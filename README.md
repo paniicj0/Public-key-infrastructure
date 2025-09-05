@@ -1,6 +1,4 @@
-Public Key Infrastructure (PKI) System
-
-A comprehensive Public Key Infrastructure (PKI) system for centralized certificate management with multi-level hierarchy support.
+A comprehensive Public Key Infrastructure (PKI) system for centralized certificate management with a multi-level hierarchy.
 
 🌟 Features
 Certificate Hierarchy Management
@@ -17,45 +15,78 @@ Certificate Operations
 
 Certificate generation with custom parameters
 
-X.500 name support for certificate subjects
+X.500 subject names
 
-Certificate extensions management (keyCertSign, BasicConstraints, etc.)
+Extensions management (e.g., keyCertSign, BasicConstraints, …)
 
-Validity period configuration
+Configurable validity period
 
-Security Features
+Security
 
 Digital signature validation
 
-Certificate revocation status checking
+Certificate revocation status checks
 
 Issuer certificate validity verification
 
-User Management
+User & Org Management
 
 Role-based access control (Admin, User)
 
-Organization-based user segregation
+Organization-scoped users
 
-Email activation system
+Email activation flow
 
 JWT authentication
 
 🏗️ System Architecture
 Backend (Spring Boot)
-Java 17+ with Spring Boot 3.0+
 
-Spring Security with JWT authentication
+Java 17+, Spring Boot 3.0+
 
-Spring Data JPA for database operations
+Spring Security (JWT)
 
-PostgreSQL database
+Spring Data JPA
 
-Bouncy Castle for cryptographic operations
+PostgreSQL
+
+Bouncy Castle (crypto)
 
 Frontend (Angular)
-Angular 15+ with TypeScript
 
-Angular Material for UI components
+Angular 15+ (TypeScript)
 
-JWT authentication integration
+Angular Material (UI)
+
+JWT integration
+
+🧰 Tech Stack
+
+Backend: Java, Spring Boot, Spring Security, JPA/Hibernate, Bouncy Castle
+
+Database: PostgreSQL
+
+Frontend: Angular, Angular Material
+
+Auth: JWT
+
+License: MIT
+
+🚀 Getting Started (high-level)
+# Backend
+# 1) Configure PostgreSQL connection in application.yml/properties
+# 2) Build & run
+./mvnw spring-boot:run
+
+# Frontend
+# 1) Install deps
+npm install
+# 2) Run dev server
+ng serve
+
+
+Make sure Java 17+, Node.js (for Angular), and PostgreSQL 13+ are installed.
+
+📄 License
+
+This project is licensed under the MIT License.
