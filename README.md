@@ -1,92 +1,44 @@
-A comprehensive Public Key Infrastructure (PKI) system for centralized certificate management with a multi-level hierarchy.
+# 🔐 Public Key Infrastructure (PKI) System
 
-🌟 Features
-Certificate Hierarchy Management
+A robust **Public Key Infrastructure (PKI)** application for centralized certificate management with a multi-level hierarchy (Root CA → Intermediate CA → End-Entity).  
+Built with **Spring Boot** (backend) and **Angular** (frontend).
 
-Root CA certificates
+---
 
-Intermediate CA certificates
+## ✨ Features
 
-End-Entity certificates
+- **Certificate Hierarchy**
+  - Root CA, unlimited Intermediate CAs, and End-Entity certificates
+  - Extensions (BasicConstraints, KeyUsage, ExtendedKeyUsage, etc.)
+- **Certificate Operations**
+  - Generation (RSA/ECDSA), CSR handling, export (PEM/DER/PFX)
+  - Revocation with CRL support and status validation
+- **Security**
+  - Digital signature creation and verification
+  - Certificate chain trust validation
+  - Planned CRL/OCSP support
+- **User Management**
+  - Role-based access (Admin, User)
+  - Organization-based user separation
+  - JWT authentication and email activation
+- **Audit Logging**
+  - Issuance/revocation logs with metadata for traceability
 
-Unlimited intermediate levels
+---
 
-Certificate Operations
+## 🧱 Architecture
 
-Certificate generation with custom parameters
+- **Backend (Spring Boot)**
+  - Spring Security + JWT
+  - PostgreSQL via JPA/Hibernate
+  - Java Cryptography (with BouncyCastle)
+  - Email notifications for account activation
 
-X.500 subject names
+- **Frontend (Angular)**
+  - Admin panel for CA management
+  - User portal for certificate requests/downloads
+  - Guards & interceptors for secure routing
 
-Extensions management (e.g., keyCertSign, BasicConstraints, …)
-
-Configurable validity period
-
-Security
-
-Digital signature validation
-
-Certificate revocation status checks
-
-Issuer certificate validity verification
-
-User & Org Management
-
-Role-based access control (Admin, User)
-
-Organization-scoped users
-
-Email activation flow
-
-JWT authentication
-
-🏗️ System Architecture
-Backend (Spring Boot)
-
-Java 17+, Spring Boot 3.0+
-
-Spring Security (JWT)
-
-Spring Data JPA
-
-PostgreSQL
-
-Bouncy Castle (crypto)
-
-Frontend (Angular)
-
-Angular 15+ (TypeScript)
-
-Angular Material (UI)
-
-JWT integration
-
-🧰 Tech Stack
-
-Backend: Java, Spring Boot, Spring Security, JPA/Hibernate, Bouncy Castle
-
-Database: PostgreSQL
-
-Frontend: Angular, Angular Material
-
-Auth: JWT
-
-License: MIT
-
-🚀 Getting Started (high-level)
-# Backend
-# 1) Configure PostgreSQL connection in application.yml/properties
-# 2) Build & run
-./mvnw spring-boot:run
-
-# Frontend
-# 1) Install deps
-npm install
-# 2) Run dev server
-ng serve
+---
 
 
-Make sure Java 17+, Node.js (for Angular), and PostgreSQL 13+ are installed.
-
-📄 License
-
-This project is licensed under the MIT License.
