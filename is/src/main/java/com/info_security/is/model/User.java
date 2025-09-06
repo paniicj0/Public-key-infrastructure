@@ -1,5 +1,6 @@
 package com.info_security.is.model;
 
+import com.info_security.is.dto.UserDto;
 import com.info_security.is.enums.UserRole;
 import jakarta.persistence.*;
 import lombok.*;
@@ -23,9 +24,9 @@ public class User implements UserDetails {
     private String email;
     @Column(nullable = false, unique = true)
     private String password;
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String firstName;
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String lastName;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -56,5 +57,14 @@ public class User implements UserDetails {
     @Override
     public String getUsername() {
         return "";
+    }
+
+    public User(UserDto userDto) {
+        this.email = userDto.getEmail();
+        this.password = userDto.getPassword();
+        this.firstName = userDto.getFirstName();
+        this.lastName = userDto.getLastName();
+        this.role = userDto.getRole();
+        this.isActive = userDto.isActive();
     }
 }

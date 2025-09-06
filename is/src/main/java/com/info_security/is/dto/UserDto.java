@@ -22,21 +22,21 @@ import org.springframework.stereotype.Component;
 @AllArgsConstructor
 public class UserDto {
 
+    protected Long id;
     protected String email;
     protected String password;
     protected String firstName;
     protected String lastName;
     protected UserRole role;
     protected boolean isActive;
-    protected Long organizationId;
 
     public UserDto(User user){
+        this.id = user.getId();
         this.email = user.getEmail();
         this.password = user.getPassword();
         this.firstName = user.getFirstName();
         this.lastName = user.getLastName();
         this.role = user.getRole();
         this.isActive = user.isActive();
-        this.organizationId=user.getOrganization().getId();
     }
 }
