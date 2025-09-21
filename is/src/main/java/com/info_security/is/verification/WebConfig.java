@@ -83,7 +83,7 @@ public class WebConfig {
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(restAuthenticationEntryPoint))
                 // Configure authorization rules
                 .authorizeHttpRequests(request -> request
-                        .requestMatchers("/api/register/users", "/api/login", "/api/verify/users/{userId}").permitAll()
+                        .requestMatchers("/api/register/users", "/api/login", "/api/verify/users/{userId}",  "/api/activation/verify/**").permitAll()
                         .requestMatchers("/h2/**", "/socket/**", "/error").permitAll()
                         .anyRequest().authenticated()
                 )

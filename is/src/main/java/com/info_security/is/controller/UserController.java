@@ -2,20 +2,26 @@ package com.info_security.is.controller;
 
 import com.info_security.is.dto.AdminDto;
 import com.info_security.is.dto.CaDto;
+import com.info_security.is.dto.RegisterUserDto;
 import com.info_security.is.dto.UserDto;
 import com.info_security.is.enums.UserRole;
-import com.info_security.is.model.Activation;
-import com.info_security.is.model.Admin;
-import com.info_security.is.model.CA;
-import com.info_security.is.model.User;
+import com.info_security.is.model.*;
 import com.info_security.is.service.ActivationService;
+import com.info_security.is.service.OrganizationService;
 import com.info_security.is.service.UserService;
+import com.info_security.is.verification.TokenVerify;
 import jakarta.mail.MessagingException;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
@@ -27,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Optional;
 
 @Controller
+@RequestMapping("/api")
 public class UserController {
 
     @Autowired
@@ -38,7 +45,16 @@ public class UserController {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private OrganizationService organizationService;
 
+    @Autowired
+    private TokenVerify tokenUtils;
+
+    @Autowired
+    private AuthenticationManager authenticationManager;
+
+    @CrossOrigin(origins = "http://localhost:4200")
     @PutMapping("/verify/users/{userId}")
     public ResponseEntity<String> verifyUserAccount(@PathVariable Long userId) {
         try {
@@ -56,32 +72,41 @@ public class UserController {
     }
 
     @Transactional
-    // 1.1 Registracija korisnika //create user
-    @PostMapping(value = "/register/users", name = "register user")// api/users?type=GUEST
-    public ResponseEntity<Long> registerUser(@RequestBody UserDto userDTO) throws MessagingException, UnsupportedEncodingException {
+    @PostMapping(value = "/register/users", name = "register user")
+    public ResponseEntity<Long> registerUser(@RequestBody RegisterUserDto dto,
+                                             @RequestParam("type") UserRole role)
+            throws MessagingException, UnsupportedEncodingException {
 
-        User user = new User((UserDto) userDTO);
+        // 1) Organizacija po imenu (find or create)
+        Organization org = organizationService.findOrCreateByName(dto.getOrganizationName());
 
-        user.setRole(UserRole.USER);
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
+        // 2) Napravi korisnika i popuni polja
+        User user = new User();
+        user.setEmail(dto.getEmail());
+        user.setPassword(passwordEncoder.encode(dto.getPassword()));
+        user.setFirstName(dto.getFirstName());
+        user.setLastName(dto.getLastName());
+        user.setRole(role);
+        user.setActive(false);              // preporuka: neaktivan dok ne potvrdi mail
+        user.setOrganization(org);          // <-- ključni deo: vežemo na organizaciju
+
         userService.saveUser(user);
 
-        // Kreiraj aktivaciju
+        // 3) Kreiraj aktivaciju
         Activation activation = new Activation();
-        activation.setUser(user);  // poveži aktivaciju sa korisnikom
-        activation.setCreationDate(LocalDateTime.now());  // postavi datum kreacije
-        activation.setExpirationDate(LocalDateTime.now().plusHours(24));  // postavi datum isteka
-
+        activation.setUser(user);
+        activation.setCreationDate(LocalDateTime.now());
+        activation.setExpirationDate(LocalDateTime.now().plusHours(24));
         user.setActivation(activation);
 
-        // Spasi korisnika (što će automatski sačuvati aktivaciju zbog cascade)
-        userService.saveUser(user);
+        userService.saveUser(user); // zbog cascade će sačuvati i activation
 
-        // Pošaljite aktivacioni mail
+        // 4) Pošalji aktivacioni e-mail
         activationService.sendActivationEmail(user);
 
         return new ResponseEntity<>(user.getId(), HttpStatus.CREATED);
     }
+
 
     @GetMapping(value = "/users/byUsername/{username}")
     public ResponseEntity<?> getUserAccountByEmail(@PathVariable String username) {
@@ -110,5 +135,32 @@ public class UserController {
 
         // Ako nije moguće odrediti tip korisnika
         return new ResponseEntity<>("Unsupported user role or type", HttpStatus.BAD_REQUEST);
+    }
+
+    @PostMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> createAuthenticationToken(
+            @RequestBody AuthenticationRequest authenticationRequest, HttpServletResponse response) {
+        Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
+                authenticationRequest.getUsername(), authenticationRequest.getPassword()));
+
+        // Set the authentication in the SecurityContextHolder
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        User user = (User) authentication.getPrincipal();
+
+        if (!user.isActive()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("User is not verified");
+        }
+
+        String jwt = tokenUtils.generateToken(user.getEmail());
+        return ResponseEntity.ok(jwt);
+
+    }
+
+    @GetMapping("/role")
+    public ResponseEntity<String> getRole() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User user = (User) authentication.getPrincipal();
+        return ResponseEntity.ok(user.getRole().toString());
     }
 }

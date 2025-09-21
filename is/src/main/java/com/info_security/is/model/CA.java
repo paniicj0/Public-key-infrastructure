@@ -10,8 +10,6 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@AllArgsConstructor
-@NoArgsConstructor
 public class CA extends User{
 
     public CA(CaDto caDto) {
@@ -23,4 +21,7 @@ public class CA extends User{
         this.setRole(caDto.getRole());
     }
 
+    public CA() {
+
+    }
 }

@@ -10,9 +10,7 @@ import org.springframework.stereotype.Component;
 
 @Getter
 @Setter
-@Component
 @NoArgsConstructor
-@AllArgsConstructor
 public class CaDto extends UserDto{
 
     public CaDto(CA user){

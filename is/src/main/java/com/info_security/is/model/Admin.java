@@ -11,8 +11,6 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@AllArgsConstructor
-@NoArgsConstructor
 public class Admin extends User{
 
     public Admin(AdminDto adminDto) {
@@ -22,5 +20,9 @@ public class Admin extends User{
         this.setFirstName(adminDto.getFirstName());
         this.setLastName(adminDto.getLastName());
         this.setRole(adminDto.getRole());
+    }
+
+    public Admin() {
+
     }
 }

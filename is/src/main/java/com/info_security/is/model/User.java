@@ -13,7 +13,6 @@ import java.util.List;
 @Entity
 @Getter
 @Setter
-@AllArgsConstructor
 @NoArgsConstructor
 @Table(name = "users")
 public class User implements UserDetails {
@@ -45,10 +44,6 @@ public class User implements UserDetails {
         return isActive;
     }
 
-    public void setActive(boolean active) {
-        isActive = active;
-    }
-
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of();
@@ -67,4 +62,44 @@ public class User implements UserDetails {
         this.role = userDto.getRole();
         this.isActive = userDto.isActive();
     }
+
+    public User (Long id, String email, String password, String firstName, String lastName, UserRole role, boolean isActive) {
+        this.id = id;
+        this.email = email;
+        this.password = password;
+        this.firstName = firstName;
+        this.lastName = lastName;
+        this.role = role;
+        this.isActive = isActive;
+    }
+
+    public Long getId() {
+        return id;
+    }
+    public UserRole getRole() {
+        return role;
+    }
+    public String getEmail() {
+        return email;
+    }
+    public String getFirstName() {
+        return firstName;
+    }
+    public String getLastName() {
+        return lastName;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setId(Long id) { this.id = id; }
+    public void setEmail(String email) { this.email = email; }
+    public void setPassword(String password) { this.password = password; }
+    public void setFirstName(String firstName) { this.firstName = firstName; }
+    public void setLastName(String lastName) { this.lastName = lastName; }
+    public void setRole(UserRole role) { this.role = role; } // 👈 OVO JE KLJUČNO
+    public void setActive(boolean active) { isActive = active; }
+    public void setActivation(Activation activation) { this.activation = activation; }
+    public void setOrganization(Organization organization) { this.organization = organization;}
 }

@@ -53,7 +53,9 @@ public class ActivationService {
         mailContent += "<p>Please click the link below to verify your registration:</p>";
         mailContent += "<p><span style='color: #800080;'>Link expires in 24 hours</span></p>";
 
-        mailContent += "<h3><a href=\"http://localhost:4200/verify?userId=" + user.getId() + "\">VERIFY</a></h3>";
+        // u slanju maila
+        mailContent += "<h3><a href=\"http://localhost:8080/api/activation/verify/"
+                + user.getId() + "\">VERIFY</a></h3>";
         mailContent += "<p>Thank you,<br>PKI Team26</p>";
         mailContent += "</div>";
 

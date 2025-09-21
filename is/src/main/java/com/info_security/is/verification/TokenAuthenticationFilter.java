@@ -41,6 +41,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
         System.out.println("--------------------username:" + username);
 
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            System.out.println("--------------------Usao u if");
             UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
             if (tokenVerify.validateToken(token, userDetails)) {
                 System.out.println("--------------------Token verified:" );
