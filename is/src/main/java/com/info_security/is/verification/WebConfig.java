@@ -83,8 +83,10 @@ public class WebConfig {
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(restAuthenticationEntryPoint))
                 // Configure authorization rules
                 .authorizeHttpRequests(request -> request
-                        .requestMatchers("/api/register/users", "/api/login", "/api/verify/users/{userId}",  "/api/activation/verify/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/register/users").permitAll()
+                        .requestMatchers("/api/login", "/api/verify/users/{userId}",  "/api/activation/verify/**").permitAll()
                         .requestMatchers("/h2/**", "/socket/**", "/error").permitAll()
+                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated()
                 )
                 // Add TokenAuthenticationFilter
