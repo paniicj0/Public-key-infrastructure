@@ -1,6 +1,6 @@
 package com.info_security.is.dto;
 
-import com.info_security.is.model.Certificate;
+import com.info_security.is.model.CertificateModel;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -25,7 +25,7 @@ public class CertificateResponse {
         this.issuerId = issuerId;
     }
 
-    public CertificateResponse(Certificate saved) {
+    public CertificateResponse(CertificateModel saved) {
         if (saved == null) return;
         this.id = saved.getId();
         this.type = saved.getType() != null ? saved.getType().name() : null;
