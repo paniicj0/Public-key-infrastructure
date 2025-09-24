@@ -1,6 +1,7 @@
 package com.info_security.is.verification;
 
 import com.info_security.is.service.CustomUserDetails;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
@@ -75,27 +76,44 @@ public class WebConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 .cors(withDefaults())
-                // Disable CSRF
                 .csrf(AbstractHttpConfigurer::disable)
-                // Set session management to stateless
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // Set unauthorized requests exception handler
-                .exceptionHandling(exception -> exception.authenticationEntryPoint(restAuthenticationEntryPoint))
-                // Configure authorization rules
-                .authorizeHttpRequests(request -> request
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(ex -> ex
+                        // 401 za neautentifikovane
+                        .authenticationEntryPoint(restAuthenticationEntryPoint)
+                        // 403 za autentifikovane bez dozvole
+                        .accessDeniedHandler((req, res, e) -> {
+                            res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            res.setContentType("application/json");
+                            res.getWriter().write("{\"error\":\"Forbidden\"}");
+                        })
+                )
+                .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/register/users").permitAll()
-                        .requestMatchers("/api/login", "/api/verify/users/{userId}",  "/api/activation/verify/**").permitAll()
+                        .requestMatchers("/api/login", "/api/verify/users/*", "/api/activation/verify/**", "/api/activation/verify").permitAll()
                         .requestMatchers("/h2/**", "/socket/**", "/error").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+
+
+                        .requestMatchers(HttpMethod.POST, "/api/certs/root").hasRole("CA")
+                        .requestMatchers(HttpMethod.POST, "/api/certs/ee").hasAnyRole("CA","ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/certs/revoke/**").hasAnyRole("CA","ADMIN")
+                        .requestMatchers(HttpMethod.GET,  "/api/certs/**").hasAnyRole("USER","ADMIN","CA")
+
                         .anyRequest().authenticated()
                 )
-                // Add TokenAuthenticationFilter
-                .addFilterBefore(new TokenAuthenticationFilter(tokenUtils, userDetailsService()), UsernamePasswordAuthenticationFilter.class);
+                // tvoj provider
+                .authenticationProvider(authenticationProvider())
+                // JWT filter pre UsernamePasswordAuthenticationFilter
+                .addFilterBefore(new TokenAuthenticationFilter(tokenUtils, userDetailsService()),
+                        UsernamePasswordAuthenticationFilter.class);
 
-        http.authenticationProvider(authenticationProvider());
+        // (opciono) za H2 konzolu u ramu
+        http.headers(h -> h.frameOptions(f -> f.disable()));
 
         return http.build();
     }
+
 
     @Bean
     public WebSecurityCustomizer webSecurityCustomizer() {
