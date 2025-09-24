@@ -7,6 +7,7 @@ import com.info_security.is.service.PkiService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import org.springframework.web.bind.annotation.*;
@@ -20,7 +21,6 @@ public class CertificateController {
     private final CertificateRepository repo;
 
 
-    // ----------------------- IZDAVANJE SERTIFIKATA ----------------------------------
     @PostMapping("/root")
     public ResponseEntity<CertificateResponse> createRoot(@Valid @RequestBody RootRequest req) throws Exception {
         CertificateModel saved = pkiService.generateRoot(req);
@@ -66,6 +66,13 @@ public class CertificateController {
                 .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cert-" + id + ".p12\"")
                 .contentType(org.springframework.http.MediaType.parseMediaType("application/x-pkcs12"))
                 .body(p12);
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<CertificateResponse> getById(@PathVariable Long id) {
+        return repo.findById(id)
+                .map(c -> ResponseEntity.ok(new CertificateResponse(c)))
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
     }
 }
 

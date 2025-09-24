@@ -79,9 +79,8 @@ public class WebConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(ex -> ex
-                        // 401 za neautentifikovane
+
                         .authenticationEntryPoint(restAuthenticationEntryPoint)
-                        // 403 za autentifikovane bez dozvole
                         .accessDeniedHandler((req, res, e) -> {
                             res.setStatus(HttpServletResponse.SC_FORBIDDEN);
                             res.setContentType("application/json");
@@ -95,10 +94,10 @@ public class WebConfig {
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 
 
-                        .requestMatchers(HttpMethod.POST, "/api/certs/root").hasRole("CA")
-                        .requestMatchers(HttpMethod.POST, "/api/certs/ee").hasAnyRole("CA","ADMIN")
-                        .requestMatchers(HttpMethod.POST, "/api/certs/revoke/**").hasAnyRole("CA","ADMIN")
-                        .requestMatchers(HttpMethod.GET,  "/api/certs/**").hasAnyRole("USER","ADMIN","CA")
+                        //.requestMatchers(HttpMethod.POST, "/api/certs/root").hasAnyRole("CA","ADMIN")
+                      //  .requestMatchers(HttpMethod.POST, "/api/certs/ee").hasAnyRole("CA","ADMIN")
+                       // .requestMatchers(HttpMethod.POST, "/api/certs/revoke/**").hasAnyRole("CA","ADMIN")
+                        //.requestMatchers(HttpMethod.GET,  "/api/certs/**").hasAnyRole("USER","ADMIN","CA")
 
                         .anyRequest().authenticated()
                 )
