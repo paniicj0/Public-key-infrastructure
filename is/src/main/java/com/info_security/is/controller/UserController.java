@@ -6,6 +6,7 @@ import com.info_security.is.dto.RegisterUserDto;
 import com.info_security.is.dto.UserDto;
 import com.info_security.is.enums.UserRole;
 import com.info_security.is.model.*;
+import com.info_security.is.repository.ActivationRepository;
 import com.info_security.is.service.ActivationService;
 import com.info_security.is.service.OrganizationService;
 import com.info_security.is.service.UserService;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.UnsupportedEncodingException;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -52,21 +54,30 @@ public class UserController {
     @Autowired
     private AuthenticationManager authenticationManager;
 
-    @CrossOrigin(origins = "http://localhost:4200")
-    @PutMapping("/verify/users/{userId}")
-    public ResponseEntity<String> verifyUserAccount(@PathVariable Long userId) {
-        try {
-            Activation activation= activationService.getActivationByUserId(userId);
+    @Autowired
+    private ActivationRepository activationRepository;
 
-            // check if activation is expired
-            if (activation.isExpired()) {
-                return new ResponseEntity<>("Activation link has expired.", HttpStatus.BAD_REQUEST);
-            }
-            userService.verifyUser(userId);
-            return new ResponseEntity<>("User successfully verified.", HttpStatus.OK);
-        } catch (EntityNotFoundException e) {
-            return new ResponseEntity<>("User not found.", HttpStatus.NOT_FOUND);
+    @CrossOrigin(origins = "http://localhost:4200")
+    @GetMapping("/activation/verify")
+    @Transactional
+    public ResponseEntity<String> verifyUserAccount(@RequestParam("token") String rawToken) {
+        String tokenHash = activationService.sha256Hex(rawToken);
+
+        Activation activation = activationRepository.findByTokenHash(tokenHash)
+                .orElseThrow(() -> new EntityNotFoundException("Invalid activation token"));
+
+        if (activation.isUsed()) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body("Activation link already used.");
         }
+        if (activation.isExpired()) {
+            return ResponseEntity.badRequest().body("Activation link has expired.");
+        }
+
+        userService.verifyUser(activation.getUser().getId());
+        activation.setUsedAt(LocalDateTime.now()); // ✅ ne LocalDateTime.from(Instant.now())
+        activationRepository.save(activation);     // ili delete(activation) za one-shot
+
+        return ResponseEntity.ok("User successfully verified.");
     }
 
     @Transactional
@@ -85,22 +96,13 @@ public class UserController {
         user.setFirstName(dto.getFirstName());
         user.setLastName(dto.getLastName());
         user.setRole(role);
-        user.setActive(false);              // preporuka: neaktivan dok ne potvrdi mail
-        user.setOrganization(org);          // <-- ključni deo: vežemo na organizaciju
-
-        userService.saveUser(user);
-
-        // 3) Kreiraj aktivaciju
-        Activation activation = new Activation();
-        activation.setUser(user);
-        activation.setCreationDate(LocalDateTime.now());
-        activation.setExpirationDate(LocalDateTime.now().plusHours(24));
-        user.setActivation(activation);
+        user.setActive(false);
+        user.setOrganization(org);
 
         userService.saveUser(user); // zbog cascade će sačuvati i activation
 
         // 4) Pošalji aktivacioni e-mail
-        activationService.sendActivationEmail(user);
+        activationService.createActivationAndSendEmail(user);
 
         return new ResponseEntity<>(user.getId(), HttpStatus.CREATED);
     }
@@ -135,25 +137,24 @@ public class UserController {
         return new ResponseEntity<>("Unsupported user role or type", HttpStatus.BAD_REQUEST);
     }
 
-    @PostMapping(value = "/login", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> createAuthenticationToken(
-            @RequestBody AuthenticationRequest authenticationRequest, HttpServletResponse response) {
-        Authentication authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
-                authenticationRequest.getUsername(), authenticationRequest.getPassword()));
+    public record LoginResponse(String token, String role) {}
 
-        // Set the authentication in the SecurityContextHolder
-        SecurityContextHolder.getContext().setAuthentication(authentication);
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(@RequestBody AuthenticationRequest req) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(req.getUsername(), req.getPassword())
+        );
 
         User user = (User) authentication.getPrincipal();
 
         if (!user.isActive()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("User is not verified");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null);
         }
 
         String jwt = tokenUtils.generateToken(user.getEmail());
-        return ResponseEntity.ok(jwt);
-
+        return ResponseEntity.ok(new LoginResponse(jwt, user.getRole().toString()));
     }
+
 
     @GetMapping("/role")
     public ResponseEntity<String> getRole() {
