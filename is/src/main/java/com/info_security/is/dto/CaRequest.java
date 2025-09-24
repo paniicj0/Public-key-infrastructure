@@ -7,16 +7,17 @@ import lombok.Setter;
 
 @Getter
 @Setter
+
 public class CaRequest {
     @NotNull
-    private Long issuerId;
-
+    private Long issuerId;           // CA koji potpisuje
     @NotNull @Valid
-    private SubjectDto subject;
-
+    public SubjectDto subject;
     @Min(1) @Max(1825)
     private int validityDays;
 
-    private Integer keySize;   // default 4096
-
+    public ExtensionsDto extensions; // CA=true
+    public String keyAlg;
+    public Integer keySize;
+    public String sigAlg;
 }

@@ -11,18 +11,15 @@ import lombok.Setter;
 public class SubjectDto {
     @NotBlank
     @Size(max = 255)
-    private String cn;     // Common Name
-
+    public String commonName;   // CN
     @Size(max = 255)
-    private String o;
-
+    public String organization; // O
     @Size(max = 255)
-    private String ou;
-
+    public String orgUnit;      // OU
     @Pattern(regexp = "^[A-Z]{2}$", message = "Country must be 2-letter ISO code (e.g., RS, US)")
-    private String c;      // Country (2 slova), opcionalno
+    public String country;      // C (2 slova)
 
-    @Size(max = 255)
-    private String e;
-
+    public String state;        // ST
+    public String locality;     // L
+    public String email;        // emailAddress
 }

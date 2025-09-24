@@ -1,15 +1,12 @@
 package com.info_security.is.controller;
 
-import com.info_security.is.dto.CertificateResponse;
-import com.info_security.is.dto.EeRequest;
-import com.info_security.is.dto.RevokeRequest;
-import com.info_security.is.dto.RootRequest;
-import com.info_security.is.model.Certificate;
+import com.info_security.is.dto.*;
+import com.info_security.is.model.CertificateModel;
+import com.info_security.is.repository.CertificateRepository;
 import com.info_security.is.service.PkiService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
+
 import org.springframework.http.ResponseEntity;
 
 import org.springframework.web.bind.annotation.*;
@@ -20,36 +17,57 @@ import org.springframework.web.bind.annotation.*;
 public class CertificateController {
 
     private final PkiService pkiService;
+    private final CertificateRepository repo;
 
+
+    // ----------------------- IZDAVANJE SERTIFIKATA ----------------------------------
     @PostMapping("/root")
     public ResponseEntity<CertificateResponse> createRoot(@Valid @RequestBody RootRequest req) throws Exception {
-        Certificate saved = pkiService.generateRoot(req);
+        CertificateModel saved = pkiService.generateRoot(req);
+        return ResponseEntity.ok(new CertificateResponse(saved));
+    }
+    @PostMapping("/ca")
+    public ResponseEntity<CertificateResponse> issueCA(@Valid @RequestBody CaRequest req) throws Exception {
+        CertificateModel saved = pkiService.issueIntermediate(req);
         return ResponseEntity.ok(new CertificateResponse(saved));
     }
 
     @PostMapping("/ee")
     public ResponseEntity<CertificateResponse> issueEE(@Valid @RequestBody EeRequest req) throws Exception {
-        Certificate saved = pkiService.issueEndEntity(req);
+        CertificateModel saved = pkiService.issueEndEntity(req);
         return ResponseEntity.ok(new CertificateResponse(saved));
     }
 
-    @GetMapping("/{id}/download")
-    public ResponseEntity<byte[]> downloadPkcs12(@PathVariable Long id,
-                                                 @RequestParam(defaultValue = "changeit") String password) throws Exception {
-        // promena: lozinka kao query param
-        byte[] pkcs12 = pkiService.generatePkcs12(id, password);
+
+    // -------------------------- PREUZIMANJE SERTIFIKATA -------------------------------------------
+
+    @GetMapping("/{id}/download/pem")
+    public ResponseEntity<byte[]> downloadPem(@PathVariable Long id) {
+        var e = repo.findById(id)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Certificate not found"));
+
+        byte[] bytes = e.getCertificatePem().getBytes(java.nio.charset.StandardCharsets.UTF_8);
         return ResponseEntity.ok()
-                .contentType(MediaType.valueOf("application/x-pkcs12"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cert.p12\"")
-                .body(pkcs12);
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cert-" + id + ".pem\"")
+                .contentType(org.springframework.http.MediaType.parseMediaType("application/x-pem-file"))
+                .body(bytes);
     }
 
-    @PatchMapping("/{id}/revoke")
-    public ResponseEntity<CertificateResponse> revoke(@PathVariable Long id,
-                                                      @Valid @RequestBody RevokeRequest req
-    ) {
+    @GetMapping("/{id}/download/p12")
+    public ResponseEntity<byte[]> downloadP12(@PathVariable Long id,
+                                              @RequestParam(defaultValue = "changeit") String password) throws Exception {
 
-        Certificate saved = pkiService.revoke(id, req.getReason(), null);
-        return ResponseEntity.ok(new CertificateResponse(saved));
+        repo.findById(id).orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.NOT_FOUND, "Certificate not found"));
+
+        byte[] p12 = pkiService.generatePkcs12(id, password);
+        return ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"cert-" + id + ".p12\"")
+                .contentType(org.springframework.http.MediaType.parseMediaType("application/x-pkcs12"))
+                .body(p12);
     }
 }
+
+
+
