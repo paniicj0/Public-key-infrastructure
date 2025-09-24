@@ -9,14 +9,14 @@ import lombok.Setter;
 
 @Getter
 @Setter
+
 public class RootRequest {
     @NotNull @Valid
     private SubjectDto subject;
-
     @Min(1) @Max(3650)
     private int validityDays;
-
-    private Integer keySize;
-
-
+    public ExtensionsDto extensions; // tipično CA=true, keyCertSign, cRLSign...
+    public String keyAlg;            // "RSA" | "EC"
+    public Integer keySize;          // npr 3072 za RSA, ignorisati za EC
+    public String sigAlg;            // "SHA256withRSA" ili "SHA256withECDSA"
 }
