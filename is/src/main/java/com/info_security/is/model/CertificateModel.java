@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @Setter
 @Entity
 @Table(name = "certificates")
-public class Certificate {
+public class CertificateModel {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -34,7 +34,7 @@ public class Certificate {
     private LocalDateTime notAfter;
 
     @ManyToOne
-    private Certificate issuer; // null za ROOT
+    private CertificateModel issuer; // null za ROOT
 
     private boolean revoked = false;
 
