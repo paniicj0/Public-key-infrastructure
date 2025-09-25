@@ -14,6 +14,5 @@ public interface ActivationRepository extends JpaRepository<Activation, Long> {
     @Query("SELECT a FROM Activation a WHERE a.user.id = :user_id")
     Optional<Activation> findByUserId(@Param("user_id") Long userId);
 
-    @Query("select a from Activation a where a.user.id = :userId")
-    Optional<Activation> findByUserIdNew(@Param("userId") Long userId);
+    Optional<Activation> findByTokenHash(String tokenHash);
 }

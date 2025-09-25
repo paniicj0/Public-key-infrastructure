@@ -567,6 +567,10 @@ public class PkiService {
         java.security.cert.CertPathValidator.getInstance("PKIX").validate(cp, params);
     }
 
+    public List<CertificateResponse> listCertificates() {
+        return repo.findAllByOrderByIdDesc()
+                .stream().map(CertificateResponse::new).toList();
+    }
 
 
 }

@@ -21,7 +21,6 @@ public class TokenVerify {
 
     @Value("someSecretKeyHereThatIsLongEnoughsomeSecretKeyHereThatIsLongEnoughsomeSecretKeyHereThatIsLongEnough")
     public String secret;
-    SecretKey key = Keys.secretKeyFor(SignatureAlgorithm.HS512);
 
     @Value("9900000")
     private Long expiresIn;
@@ -82,25 +81,6 @@ public class TokenVerify {
         final String username = getUsernameFromToken(token);
         return username != null ;//&& username.equals(userDetails.getUsername()) && !isTokenExpired(token);
     }
-    //ovaj deo je obrisan jer se vreme ne izvlaci dobro iz tokena
-    /*private Boolean isTokenExpired(String token) {
-        final Date expiration = getExpirationDateFromToken(token);
-        return expiration != null && expiration.before(new Date());
-    }
-
-    private Date getExpirationDateFromToken(String token) {
-        Date expiration;
-        try {
-            final Claims claims = getAllClaimsFromToken(token);
-            expiration = claims.getExpiration();
-        } catch (ExpiredJwtException ex) {
-            throw ex;
-        } catch (Exception e) {
-            expiration = null;
-        }
-        return expiration;
-    }*/
-
 
 }
 

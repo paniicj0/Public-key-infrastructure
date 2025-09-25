@@ -7,9 +7,12 @@ import com.info_security.is.service.PkiService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/certs")
@@ -19,8 +22,11 @@ public class CertificateController {
     private final PkiService pkiService;
     private final CertificateRepository repo;
 
+    @GetMapping("/getAll")
+    public List<CertificateResponse> listAll() {
+        return pkiService.listCertificates();
+    }
 
-    // ----------------------- IZDAVANJE SERTIFIKATA ----------------------------------
     @PostMapping("/root")
     public ResponseEntity<CertificateResponse> createRoot(@Valid @RequestBody RootRequest req) throws Exception {
         CertificateModel saved = pkiService.generateRoot(req);
@@ -68,14 +74,13 @@ public class CertificateController {
                 .body(p12);
     }
 
+  
     @GetMapping("/{id}")
-    public ResponseEntity<CertificateResponse> getOne(@PathVariable Long id) {
-        var e = repo.findById(id).orElseThrow(() ->
-                new org.springframework.web.server.ResponseStatusException(
-                        org.springframework.http.HttpStatus.NOT_FOUND, "Certificate not found"));
-        return ResponseEntity.ok(new CertificateResponse(e));
+    public ResponseEntity<CertificateResponse> getById(@PathVariable Long id) {
+        return repo.findById(id)
+                .map(c -> ResponseEntity.ok(new CertificateResponse(c)))
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
     }
-
 
 }
 
