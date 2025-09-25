@@ -12,6 +12,8 @@ import org.springframework.http.ResponseEntity;
 
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/certs")
 @RequiredArgsConstructor
@@ -20,6 +22,10 @@ public class CertificateController {
     private final PkiService pkiService;
     private final CertificateRepository repo;
 
+    @GetMapping("/getAll")
+    public List<CertificateResponse> listAll() {
+        return pkiService.listCertificates();
+    }
 
     @PostMapping("/root")
     public ResponseEntity<CertificateResponse> createRoot(@Valid @RequestBody RootRequest req) throws Exception {

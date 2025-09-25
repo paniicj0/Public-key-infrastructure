@@ -21,7 +21,6 @@ public class TokenVerify {
 
     @Value("someSecretKeyHereThatIsLongEnoughsomeSecretKeyHereThatIsLongEnoughsomeSecretKeyHereThatIsLongEnough")
     public String secret;
-    SecretKey key = Keys.secretKeyFor(SignatureAlgorithm.HS512);
 
     @Value("9900000")
     private Long expiresIn;

@@ -13,4 +13,5 @@ public interface CertificateRepository extends JpaRepository<CertificateModel, L
     Optional<CertificateModel> findBySerialNumber(String serialNumber);
     Page<CertificateModel> findAllByType(CertifaceteType type, Pageable pageable);
     List<CertificateModel> findAllByIssuerId(Long issuerId);
+    List<CertificateModel> findAllByOrderByIdDesc();
 }
