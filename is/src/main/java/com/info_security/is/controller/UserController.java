@@ -1,9 +1,6 @@
 package com.info_security.is.controller;
 
-import com.info_security.is.dto.AdminDto;
-import com.info_security.is.dto.CaDto;
-import com.info_security.is.dto.RegisterUserDto;
-import com.info_security.is.dto.UserDto;
+import com.info_security.is.dto.*;
 import com.info_security.is.enums.UserRole;
 import com.info_security.is.model.*;
 import com.info_security.is.repository.ActivationRepository;
@@ -21,12 +18,15 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.UnsupportedEncodingException;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 @Controller

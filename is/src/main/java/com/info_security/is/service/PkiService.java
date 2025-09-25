@@ -1,9 +1,11 @@
 package com.info_security.is.service;
 import com.info_security.is.dto.*;
 import com.info_security.is.enums.CertifaceteType;
+import com.info_security.is.enums.UserRole;
 import com.info_security.is.model.CertificateModel;
 import com.info_security.is.crypto.CryptoUtil;
 import com.info_security.is.crypto.PemUtil;
+import com.info_security.is.model.User;
 import com.info_security.is.repository.CertificateRepository;
 import org.bouncycastle.asn1.x500.X500NameBuilder;
 import org.bouncycastle.asn1.x500.style.BCStyle;
@@ -21,6 +23,7 @@ import org.bouncycastle.asn1.x509.SubjectKeyIdentifier;
 import org.bouncycastle.asn1.x509.AuthorityKeyIdentifier;
 import org.bouncycastle.asn1.x500.X500Name;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +44,9 @@ public class PkiService {
 
     private final CertificateRepository repo;
     private final CryptoUtil crypto;
+
+    @Autowired
+    private UserService userService;
 
 
     public PkiService(CertificateRepository repo, CryptoUtil crypto) {
@@ -570,6 +576,81 @@ public class PkiService {
     public List<CertificateResponse> listCertificates() {
         return repo.findAllByOrderByIdDesc()
                 .stream().map(CertificateResponse::new).toList();
+    }
+
+
+    //AUTOMATSKI SE UNOSI ORGANIZACIJA KORISNIKA
+    @Transactional
+    public CertificateModel issueIntermediateCaUser(CaRequest req) throws Exception {
+        // 1) Učitaj izdavaoca
+        CertificateModel issuerE = repo.findById(req.getIssuerId())
+                .orElseThrow(() -> new IllegalArgumentException("Issuer not found: " + req.getIssuerId()));
+
+        // 2) Validacija izdavaoca (vreme, status, CA, keyCertSign)
+        assertIssuerIsValid(issuerE);
+
+        // 3) Vremenski opseg za novi CA (ne sme da pređe izdavaoca)
+        X509Certificate issuerCert = PemUtil.pemToCert(issuerE.getCertificatePem());
+        Date nb = new Date();
+        Date na = dateAfterDays(req.getValidityDays());
+        if (na.toInstant().isAfter(issuerCert.getNotAfter().toInstant())) {
+            na = issuerCert.getNotAfter();
+        }
+
+        // 4) Ključevi za subject CA
+        int keySize = Optional.ofNullable(req.getKeySize()).orElse(4096);
+        KeyPair caKeys = generateKeypair("RSA", keySize);
+
+        // 5) Imena i builder
+        X500Name subject = buildX500WithUserOrganization(req.getSubject()).build();
+        X500Name issuerName = X500Name.getInstance(issuerCert.getSubjectX500Principal().getEncoded());
+        BigInteger serial = new BigInteger(160, new SecureRandom());
+
+        JcaX509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
+                issuerName, serial, nb, na, subject, caKeys.getPublic());
+
+        // 6) Ekstenzije za CA (BasicConstraints + pathLen, KeyUsage, SKI/AKI)
+        applyExtensionsForCA(b, caKeys.getPublic(), issuerCert, req.getExtensions());
+
+        // 7) Potpis
+        PrivateKey issuerKey = crypto.decryptPrivateKey(issuerE.getPrivateKeyEnc());
+        var signer = new JcaContentSignerBuilder("SHA256withRSA").build(issuerKey);
+        X509CertificateHolder holder = b.build(signer);
+        X509Certificate caCert = new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
+        caCert.verify(issuerCert.getPublicKey()); // sanity check
+
+        // 8) Upis u bazu
+        CertificateModel e = new CertificateModel();
+        e.setType(CertifaceteType.CA);
+        e.setSerialNumber(caCert.getSerialNumber().toString());
+        e.setCertificatePem(PemUtil.certToPem(caCert));
+        e.setPrivateKeyEnc(crypto.encryptPrivateKey(caKeys.getPrivate()));
+        e.setNotBefore(toLdt(caCert.getNotBefore()));
+        e.setNotAfter(toLdt(caCert.getNotAfter()));
+        e.setIssuer(issuerE);
+        // ako tvoj model ima polje keyCertSign, ovde bi bilo: e.setKeyCertSign(true);
+
+        return repo.save(e);
+    }
+
+    private X500NameBuilder buildX500WithUserOrganization(SubjectDto s) {
+        X500NameBuilder b = new X500NameBuilder(BCStyle.INSTANCE);
+
+        // Common Name (CN) - koristi iz DTO
+        if (s.commonName != null) b.addRDN(CN, s.commonName);
+
+        // Organizacija (O) - UVEK koristi organizaciju trenutnog korisnika
+        String userOrganization = userService.getCurrentUserOrganization();
+        b.addRDN(O, userOrganization);
+
+        // Ostala polja - koristi iz DTO
+        if (s.orgUnit != null) b.addRDN(OU, s.orgUnit);
+        if (s.country != null) b.addRDN(C, s.country);
+        if (s.state != null) b.addRDN(ST, s.state);
+        if (s.locality != null) b.addRDN(L, s.locality);
+        if (s.email != null) b.addRDN(EmailAddress, s.email);
+
+        return b;
     }
 
 

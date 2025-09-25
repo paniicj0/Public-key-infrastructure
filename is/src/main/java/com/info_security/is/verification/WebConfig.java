@@ -89,16 +89,9 @@ public class WebConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/register/users").permitAll()
-                        .requestMatchers("/api/login", "/api/verify/users/*", "/api/activation/verify/**", "/api/activation/verify").permitAll()
+                        .requestMatchers("/api/me","/api/login", "/api/verify/users/*", "/api/activation/verify/**", "/api/activation/verify").permitAll()
                         .requestMatchers("/h2/**", "/socket/**", "/error").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-
-
-                        //.requestMatchers(HttpMethod.POST, "/api/certs/root").hasAnyRole("CA","ADMIN")
-                      //  .requestMatchers(HttpMethod.POST, "/api/certs/ee").hasAnyRole("CA","ADMIN")
-                       // .requestMatchers(HttpMethod.POST, "/api/certs/revoke/**").hasAnyRole("CA","ADMIN")
-                        //.requestMatchers(HttpMethod.GET,  "/api/certs/**").hasAnyRole("USER","ADMIN","CA")
-
                         .anyRequest().authenticated()
                 )
                 // tvoj provider
@@ -119,8 +112,7 @@ public class WebConfig {
         return (web) -> web.ignoring()
                 .requestMatchers("/h2/**")
                 .requestMatchers(HttpMethod.GET, "/api/users/token/{token}")
-                .requestMatchers(HttpMethod.POST, "/api/login")
-                .requestMatchers(HttpMethod.GET, "/api/users/owner/{userId}");
+                .requestMatchers(HttpMethod.POST, "/api/login");
     }
 
 
