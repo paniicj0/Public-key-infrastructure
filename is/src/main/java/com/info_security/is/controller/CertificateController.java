@@ -67,6 +67,16 @@ public class CertificateController {
                 .contentType(org.springframework.http.MediaType.parseMediaType("application/x-pkcs12"))
                 .body(p12);
     }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<CertificateResponse> getOne(@PathVariable Long id) {
+        var e = repo.findById(id).orElseThrow(() ->
+                new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.NOT_FOUND, "Certificate not found"));
+        return ResponseEntity.ok(new CertificateResponse(e));
+    }
+
+
 }
 
 
