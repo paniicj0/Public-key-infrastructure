@@ -107,6 +107,29 @@ public class UserController {
         return new ResponseEntity<>(user.getId(), HttpStatus.CREATED);
     }
 
+    @PostMapping(value = "/createCA/users", name = "create CA user")
+    public ResponseEntity<Long> createCAUser(@RequestBody RegisterUserDto dto,
+                                             @RequestParam("type") UserRole role)
+            throws MessagingException, UnsupportedEncodingException {
+
+        Organization org = organizationService.findOrCreateByName(dto.getOrganizationName());
+
+        User user = new User();
+        user.setEmail(dto.getEmail());
+        user.setPassword(passwordEncoder.encode(dto.getPassword()));
+        user.setFirstName(dto.getFirstName());
+        user.setLastName(dto.getLastName());
+        user.setRole(role);
+        user.setActive(false);
+        user.setOrganization(org);
+
+        userService.saveUser(user); // zbog cascade će sačuvati i activation
+
+        activationService.createActivationAndSendEmail(user);
+
+        return new ResponseEntity<>(user.getId(), HttpStatus.CREATED);
+    }
+
 
     @GetMapping(value = "/users/byUsername/{username}")
     public ResponseEntity<?> getUserAccountByEmail(@PathVariable String username) {

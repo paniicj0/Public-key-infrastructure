@@ -587,6 +587,10 @@ public class PkiService {
         return chain;
     }
 
+    public List<CertificateResponse> listCertificates() {
+        return repo.findAllByOrderByIdDesc()
+                .stream().map(CertificateResponse::new).toList();
+    }
 
 
 }
