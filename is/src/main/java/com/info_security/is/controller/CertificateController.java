@@ -74,12 +74,14 @@ public class CertificateController {
                 .body(p12);
     }
 
+  
     @GetMapping("/{id}")
     public ResponseEntity<CertificateResponse> getById(@PathVariable Long id) {
         return repo.findById(id)
                 .map(c -> ResponseEntity.ok(new CertificateResponse(c)))
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
     }
+
 }
 
 

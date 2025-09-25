@@ -4,7 +4,6 @@ import com.info_security.is.enums.CertifaceteType;
 import com.info_security.is.model.CertificateModel;
 import com.info_security.is.crypto.CryptoUtil;
 import com.info_security.is.crypto.PemUtil;
-import com.info_security.is.enums.RevocationReason;
 import com.info_security.is.repository.CertificateRepository;
 import org.bouncycastle.asn1.x500.X500NameBuilder;
 import org.bouncycastle.asn1.x500.style.BCStyle;
@@ -28,7 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
 import java.security.*;
-import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.time.*;
@@ -109,6 +107,8 @@ public class PkiService {
 
         return repo.save(e);
     }
+
+    // Izdavanje root sertifikata
     @Transactional
     public CertificateModel generateRoot(RootRequest req) throws Exception {
         int keySize = Optional.ofNullable(req.getKeySize()).orElse(4096);
@@ -132,6 +132,7 @@ public class PkiService {
         return repo.save(e);
     }
 
+    // Izdavanje EE sertifikata (potpisan CA ili Root sertifikatom)
     @Transactional
     public CertificateModel issueEndEntity(EeRequest req) throws Exception {
         CertificateModel issuerE = repo.findById(req.getIssuerId())
@@ -159,8 +160,19 @@ public class PkiService {
         X500Name subject = buildX500(req.getSubject()).build();
         PrivateKey issuerKey = crypto.decryptPrivateKey(issuerE.getPrivateKeyEnc());
 
-        X509Certificate eeCert = signEndEntity(eeKeys, subject, issuerCert, issuerKey, nb, na);
+        BigInteger serial = new BigInteger(160, new SecureRandom());
+        var spki = SubjectPublicKeyInfo.getInstance(eeKeys.getPublic().getEncoded());
+        var issuerX500 = X500Name.getInstance(issuerCert.getSubjectX500Principal().getEncoded());
 
+        JcaX509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
+                issuerX500, serial, nb, na, subject, spki);
+
+        // Dodaj ekstenzije za EE (uključuje digitalSignature)
+        applyExtensionsForEE(b, eeKeys.getPublic(), issuerCert, req.getExtensions());
+
+        var signer = new JcaContentSignerBuilder("SHA256withRSA").build(issuerKey);
+        X509CertificateHolder holder = b.build(signer);
+        X509Certificate eeCert = new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
         CertificateModel e = new CertificateModel();
         e.setType(EE);
         e.setSerialNumber(eeCert.getSerialNumber().toString());
@@ -175,6 +187,8 @@ public class PkiService {
         return saved;
     }
 
+
+    // Preuzimanje sertifikata u .p12
     @Transactional(readOnly = true)
     public byte[] generatePkcs12(Long certId, String password) throws Exception {
         CertificateModel e = repo.findById(certId)
@@ -192,19 +206,19 @@ public class PkiService {
             System.out.println("---");
         }
 
-        // 1) Provera potpisa između karika
+        // Provera potpisa između karika
         assertChainSignature(chain);
         assertChainPKIX(chain);
 
 
-        // 2) (workaround) – probaj bez root-a
+        //(workaround) – probaj bez root-a
         List<X509Certificate> forKeyEntry = chain;
 
-        // 3) Učitaj privatni ključ i proveri da pripada leaf-u
+        // Učitaj privatni ključ i proveri da pripada leaf-u
         PrivateKey pk = (e.getPrivateKeyEnc() != null) ? crypto.decryptPrivateKey(e.getPrivateKeyEnc()) : null;
         assertKeyMatchesLeaf(pk, forKeyEntry.get(0));
 
-        // 4) Spakuj u PKCS12
+        // Spakuj u PKCS12
         KeyStore ks = KeyStore.getInstance("PKCS12");
         ks.load(null, null);
 
@@ -241,6 +255,7 @@ public class PkiService {
         v3.addExtension(Extension.subjectKeyIdentifier, false, ski);
         v3.addExtension(Extension.authorityKeyIdentifier, false, aki);
 
+        // Digitalni potpis
         var signer = new JcaContentSignerBuilder("SHA256withRSA").build(kp.getPrivate());
         X509CertificateHolder holder = v3.build(signer);
 
@@ -299,7 +314,6 @@ public class PkiService {
     private boolean isCa(X509Certificate cert) {
         try {
             byte[] ext = cert.getExtensionValue(Extension.basicConstraints.getId());
-            // Jednostavnije: Java API ima getBasicConstraints: >=0 znači CA
             return cert.getBasicConstraints() >= 0;
         } catch (Exception e) {
             return false;
@@ -316,19 +330,20 @@ public class PkiService {
         return out; // samo to!
     }
 
-    @Transactional
-    public CertificateModel revoke(Long certId, RevocationReason reason, Long actorUserId) {
-        CertificateModel e = repo.findById(certId)
-                .orElseThrow(() -> new IllegalArgumentException("Certificate not found"));
-
-        if (e.isRevoked()) return e;
-
-        e.setRevoked(true);
-        e.setRevocationReason(reason);
-        e.setRevokedAt(LocalDateTime.now());
-        e.setRevokedByUserId(actorUserId);
-        return repo.save(e);
-    }
+    // TODO - REVOKE
+//    @Transactional
+//    public CertificateModel revoke(Long certId, RevocationReason reason, Long actorUserId) {
+//        CertificateModel e = repo.findById(certId)
+//                .orElseThrow(() -> new IllegalArgumentException("Certificate not found"));
+//
+//        if (e.isRevoked()) return e;
+//
+//        e.setRevoked(true);
+//        e.setRevocationReason(reason);
+//        e.setRevokedAt(LocalDateTime.now());
+//        e.setRevokedByUserId(actorUserId);
+//        return repo.save(e);
+//    }
 
     /* ======== Helpers ======== */
 
@@ -344,26 +359,27 @@ public class PkiService {
         return b;
     }
 
-    private Date parseStart(String iso) { return Date.from(OffsetDateTime.parse(iso).toInstant()); }
-    private Date parseEnd(String iso) { return Date.from(OffsetDateTime.parse(iso).toInstant()); }
+//    private Date parseStart(String iso) { return Date.from(OffsetDateTime.parse(iso).toInstant()); }
+//    private Date parseEnd(String iso) { return Date.from(OffsetDateTime.parse(iso).toInstant()); }
 
-    private KeyPair generateKeyPair(String keyAlg, Integer keySize) throws Exception {
-        if ("EC".equalsIgnoreCase(keyAlg)) {
-            KeyPairGenerator kpg = KeyPairGenerator.getInstance("EC");
-            // P-256 default (možeš kasnije da dodaš izbor krive)
-            kpg.initialize(256);
-            return kpg.generateKeyPair();
-        } else {
-            KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
-            kpg.initialize(keySize != null ? keySize : 3072);
-            return kpg.generateKeyPair();
-        }
-    }
+//    private KeyPair generateKeyPair(String keyAlg, Integer keySize) throws Exception {
+//        if ("EC".equalsIgnoreCase(keyAlg)) {
+//            KeyPairGenerator kpg = KeyPairGenerator.getInstance("EC");
+//            kpg.initialize(256);
+//            return kpg.generateKeyPair();
+//        } else {
+//            KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
+//            kpg.initialize(keySize != null ? keySize : 3072);
+//            return kpg.generateKeyPair();
+//        }
+//    }
 
-    private BigInteger randomSerial() {
-        return new BigInteger(160, new SecureRandom()).abs();
-    }
+//    private BigInteger randomSerial() {
+//        return new BigInteger(160, new SecureRandom()).abs();
+//    }
 
+
+    // Da li je izdavaoc sertifikata validan
     private void assertIssuerIsValid(CertificateModel issuer) throws Exception {
         // 1) vreme
         LocalDateTime now = LocalDateTime.now();
@@ -389,15 +405,20 @@ public class PkiService {
         if (!hasKeyCertSign)
             throw new IllegalArgumentException("Issuer lacks keyCertSign usage.");
     }
-    private X509Certificate toJavaCert(X509CertificateHolder holder) throws Exception {
-        return new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
-    }
 
-    private String toPem(X509Certificate cert) throws Exception {
-        String b64 = Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(cert.getEncoded());
-        return "-----BEGIN CERTIFICATE-----\n" + b64 + "\n-----END CERTIFICATE-----\n";
-    }
+//
+//    private X509Certificate toJavaCert(X509CertificateHolder holder) throws Exception {
+//        return new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
+//    }
+//
+//    private String toPem(X509Certificate cert) throws Exception {
+//        String b64 = Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(cert.getEncoded());
+//        return "-----BEGIN CERTIFICATE-----\n" + b64 + "\n-----END CERTIFICATE-----\n";
+//    }
 
+
+
+    // Provera da li je samo potpisan
     private boolean isSelfSigned(X509Certificate cert) {
         try {
             cert.verify(cert.getPublicKey());
@@ -407,12 +428,12 @@ public class PkiService {
         }
     }
 
-    private List<X509Certificate> stripRootIfPresent(List<X509Certificate> chain) {
-        if (chain.size() >= 2 && isSelfSigned(chain.get(chain.size() - 1))) {
-            return new ArrayList<>(chain.subList(0, chain.size() - 1)); // bez root-a
-        }
-        return chain;
-    }
+//    private List<X509Certificate> stripRootIfPresent(List<X509Certificate> chain) {
+//        if (chain.size() >= 2 && isSelfSigned(chain.get(chain.size() - 1))) {
+//            return new ArrayList<>(chain.subList(0, chain.size() - 1)); // bez root-a
+//        }
+//        return chain;
+//    }
 
     private void assertChainSignature(List<X509Certificate> chain) throws Exception {
         for (int i = 0; i < chain.size() - 1; i++) {
@@ -425,7 +446,6 @@ public class PkiService {
         if (pk == null) return;
         if (pk.getAlgorithm().equalsIgnoreCase("RSA") && leaf.getPublicKey() instanceof java.security.interfaces.RSAPublicKey pub) {
             var priv = (java.security.interfaces.RSAPrivateKey) pk;
-            // Ako imaš RSAPrivateCrtKey, možeš direktno uporediti modulus
             if (pk instanceof java.security.interfaces.RSAPrivateCrtKey crt) {
                 if (!crt.getModulus().equals(pub.getModulus())) {
                     throw new IllegalStateException("Private key does not match leaf certificate public key (modulus mismatch).");
@@ -545,46 +565,6 @@ public class PkiService {
         // params.setSigProvider("BC");
 
         java.security.cert.CertPathValidator.getInstance("PKIX").validate(cp, params);
-    }
-    /** Baca jasan exception ako neka karika ne valja (ili nije CA). */
-    private void assertChainValid(List<X509Certificate> chain) throws Exception {
-        if (chain == null || chain.isEmpty())
-            throw new IllegalStateException("Empty certificate chain.");
-
-        for (int i = 0; i < chain.size() - 1; i++) {
-            X509Certificate child = chain.get(i);
-            X509Certificate parent = chain.get(i + 1);
-
-            // 1) Potpis
-            try {
-                child.verify(parent.getPublicKey());
-            } catch (Exception ex) {
-                throw new IllegalStateException(
-                        "Chain broken between index " + i + " (subject=" + child.getSubjectX500Principal() +
-                                ") and index " + (i+1) + " (subject=" + parent.getSubjectX500Principal() + "): " + ex.getMessage(), ex);
-            }
-
-            // 2) Roditelj mora biti CA
-            if (parent.getBasicConstraints() < 0) {
-                throw new IllegalStateException(
-                        "Issuer at index " + (i+1) + " is not a CA: " + parent.getSubjectX500Principal());
-            }
-        }
-
-        // 3) Ako postoji root, proveri da je self-signed
-        X509Certificate last = chain.get(chain.size() - 1);
-        if (chain.size() > 1 && !isSelfSigned(last)) {
-            throw new IllegalStateException(
-                    "Last certificate in chain is not self-signed: " + last.getSubjectX500Principal());
-        }
-    }
-
-    /** Neki klijenti žele chain bez self-signed root-a. */
-    private List<X509Certificate> maybeStripRoot(List<X509Certificate> chain) {
-        if (chain.size() >= 2 && isSelfSigned(chain.get(chain.size() - 1))) {
-            return new ArrayList<>(chain.subList(0, chain.size() - 1)); // bez root-a
-        }
-        return chain;
     }
 
     public List<CertificateResponse> listCertificates() {
