@@ -4,6 +4,7 @@ import com.info_security.is.dto.*;
 import com.info_security.is.model.CertificateModel;
 import com.info_security.is.repository.CertificateRepository;
 import com.info_security.is.service.PkiService;
+import com.info_security.is.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -21,11 +22,10 @@ public class CertificateController {
 
     private final PkiService pkiService;
     private final CertificateRepository repo;
+    private final UserService userService;
 
-    @GetMapping("/getAll")
-    public List<CertificateResponse> listAll() {
-        return pkiService.listCertificates();
-    }
+
+
 
     @PostMapping("/root")
     public ResponseEntity<CertificateResponse> createRoot(@Valid @RequestBody RootRequest req) throws Exception {
@@ -86,6 +86,19 @@ public class CertificateController {
         return repo.findById(id)
                 .map(c -> ResponseEntity.ok(new CertificateResponse(c)))
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
+    }
+
+    // --------------------------- GET -----------------------------------
+    @GetMapping("/getAll")
+    public List<CertificateResponse> listAll() {
+        return pkiService.listCertificates();
+    }
+
+
+    // CA sertifikati
+    @GetMapping("/ca-certs")
+    public List<CertificateResponse> listCACertificates() {
+        return pkiService.listCertificatesCA();
     }
 
 }

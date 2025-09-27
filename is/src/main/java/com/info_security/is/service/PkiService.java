@@ -578,6 +578,17 @@ public class PkiService {
                 .stream().map(CertificateResponse::new).toList();
     }
 
+    // CA moze da ima uvid samo u svoje sertifikate
+    public List<CertificateResponse> listCertificatesCA() {
+        User currentUser = userService.getCurrentUser();
+        if (currentUser == null) {
+            throw new SecurityException("User not authenticated");
+        }
+
+        return repo.findById(currentUser.getId())
+                    .stream().map(CertificateResponse::new).toList();
+    }
+
 
     //AUTOMATSKI SE UNOSI ORGANIZACIJA KORISNIKA
     @Transactional

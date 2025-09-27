@@ -79,7 +79,7 @@ public class UserService  implements UserDetailsService {
         return currentUser.getOrganization().getName();
     }
 
-    private User getCurrentUser() {
+    public User getCurrentUser() {
         try {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
             System.out.println("Getting current user...");
