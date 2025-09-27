@@ -38,6 +38,12 @@ public class CertificateController {
         return ResponseEntity.ok(new CertificateResponse(saved));
     }
 
+    @PostMapping("/caUser-create-ca")
+    public ResponseEntity<CertificateResponse> issueCAcreateByCaUser(@Valid @RequestBody CaRequest req) throws Exception {
+        CertificateModel saved = pkiService.issueIntermediateCaUser(req);
+        return ResponseEntity.ok(new CertificateResponse(saved));
+    }
+
     @PostMapping("/ee")
     public ResponseEntity<CertificateResponse> issueEE(@Valid @RequestBody EeRequest req) throws Exception {
         CertificateModel saved = pkiService.issueEndEntity(req);
