@@ -18,16 +18,13 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.UnsupportedEncodingException;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
 @Controller
 @RequestMapping("/api")
@@ -127,35 +124,34 @@ public class UserController {
         return new ResponseEntity<>(user.getId(), HttpStatus.CREATED);
     }
 
-
-    @GetMapping(value = "/users/byUsername/{username}")
+    @GetMapping("/users/byUsername/{username}")
     public ResponseEntity<?> getUserAccountByEmail(@PathVariable String username) {
-        Optional<User> userOptional = userService.findByEmail(username);
-
-        System.out.println(userOptional);
-
-        // Proverite da li Optional SADRŽI usera
-        if (!userOptional.isPresent()) {
-            return new ResponseEntity<>(null, HttpStatus.NOT_FOUND);
-        }
-        // Izvucite User objekat iz Optionala
-        User user = userOptional.get();
-
-        // Provera tipa korisnika pre kastovanja
-        if (user.getRole() == UserRole.CA && user instanceof CA) {
-            CA ca = (CA) user;
-            return new ResponseEntity<>(new CaDto(ca), HttpStatus.OK);
-        } else if (user.getRole() == UserRole.ADMIN && user instanceof Admin) {
-            Admin admin = (Admin) user;
-            return new ResponseEntity<>(new AdminDto(admin), HttpStatus.OK);
-        } else if (user.getRole() == UserRole.USER && user instanceof User) {
-            User od = (User) user;
-            return new ResponseEntity<>(new UserDto(od), HttpStatus.OK);
-        }
-
-        // Ako nije moguće odrediti tip korisnika
-        return new ResponseEntity<>("Unsupported user role or type", HttpStatus.BAD_REQUEST);
+        return userService.findByEmail(username)
+                .map(u -> {
+                    UserRole role = u.getRole();
+                    switch (role) {
+                        case ADMIN: {
+                            Admin admin = new Admin();
+                            copyUserFields(u, admin);
+                            return new ResponseEntity<>(new AdminDto(admin), HttpStatus.OK);
+                        }
+                        case CA:       // ako u enumu imaš i CA_USER, dodaj još jedan case
+                        {
+                            CA ca = new CA();
+                            copyUserFields(u, ca);
+                            return new ResponseEntity<>(new CaDto(ca), HttpStatus.OK);
+                        }
+                        case USER: {
+                            return new ResponseEntity<>(new UserDto(u), HttpStatus.OK);
+                        }
+                        default:
+                            return new ResponseEntity<>("Unsupported user role: " + role, HttpStatus.BAD_REQUEST);
+                    }
+                })
+                .orElseGet(() -> new ResponseEntity<>(null, HttpStatus.NOT_FOUND));
     }
+
+
 
     public record LoginResponse(String token, String role) {}
 
@@ -182,4 +178,24 @@ public class UserController {
         User user = (User) authentication.getPrincipal();
         return ResponseEntity.ok(user.getRole().toString());
     }
+
+    @GetMapping("/organization")
+    public ResponseEntity<Map<String, String>> myOrganization() {
+        String org = userService.getCurrentUserOrganization();
+        return ResponseEntity.ok(Map.of("organization", org));
+    }
+
+
+    // ------------------ HELPER --------------------------
+    private static void copyUserFields(User src, User dst) {
+        dst.setId(src.getId());
+        dst.setEmail(src.getEmail());
+        dst.setPassword(src.getPassword());
+        dst.setFirstName(src.getFirstName());
+        dst.setLastName(src.getLastName());
+        dst.setRole(src.getRole());
+        dst.setActive(src.isActive());
+        dst.setOrganization(src.getOrganization());
+    }
+
 }

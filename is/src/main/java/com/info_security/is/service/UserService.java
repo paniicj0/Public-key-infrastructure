@@ -12,8 +12,11 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Optional;
+
+import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
 
 @Service
@@ -64,16 +67,15 @@ public class UserService  implements UserDetailsService {
 
     }
 
+
     public String getCurrentUserOrganization() {
         User currentUser = getCurrentUser();
         if (currentUser == null) {
-            throw new SecurityException("User not authenticated");
+            throw new ResponseStatusException(UNAUTHORIZED, "User not authenticated");
         }
-
         if (currentUser.getOrganization() == null) {
-            throw new SecurityException("User organization not found for user: " + currentUser.getEmail());
+            throw new ResponseStatusException(UNAUTHORIZED, "User organization not found for user: " + currentUser.getEmail());
         }
-
         return currentUser.getOrganization().getName();
     }
 
@@ -83,25 +85,41 @@ public class UserService  implements UserDetailsService {
             System.out.println("Getting current user...");
 
             if (authentication == null || !authentication.isAuthenticated()) {
-                System.out.println("User not authenticated");
+                System.out.println("User not authenticated (no auth or not authenticated).");
                 return null;
             }
 
-            String email = authentication.getName();
+            Object principal = authentication.getPrincipal();
+
+            // 1) Ako je principal već naš entitet User
+            if (principal instanceof User u) {
+                // Ako org nije učitan/lazy-null, dovuci ga iz baze join-fetch upitom
+                if (u.getOrganization() == null) {
+                    return userRepository.findByEmailWithOrganization(u.getEmail())
+                            .orElse(u); // makar vrati postojeći principal
+                }
+                return u;
+            }
+
+            // 2) Ako je principal UserDetails – uzmi username (email)
+            String email = null;
+            if (principal instanceof UserDetails ud) {
+                email = ud.getUsername();
+            } else if (principal instanceof String s && !"anonymousUser".equalsIgnoreCase(s)) {
+                email = s;
+            }
+
+            if (email == null || email.isBlank()) {
+                System.out.println("Principal has no email/username.");
+                return null;
+            }
+
             System.out.println("Looking for user with email: " + email);
-
-            // KORISTITE JOIN FETCH METODU
-            Optional<User> userOpt = userRepository.findByEmailWithOrganization(email);
-            if (userOpt.isPresent()) {
-                User user = userOpt.get();
-                System.out.println("User found: " + user.getEmail());
-                System.out.println("User organization: " +
-                        (user.getOrganization() != null ? user.getOrganization().getName() : "null"));
-                return user;
-            } else {
-                System.out.println("User not found in database");
-                return null;
-            }
+            return userRepository.findByEmailWithOrganization(email)
+                    .orElseGet(() -> {
+                        System.out.println("User not found in database");
+                        return null;
+                    });
 
         } catch (Exception e) {
             System.err.println("Error in getCurrentUser: " + e.getMessage());
