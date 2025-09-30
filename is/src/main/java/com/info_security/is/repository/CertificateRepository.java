@@ -17,4 +17,8 @@ public interface CertificateRepository extends JpaRepository<CertificateModel, L
     List<CertificateModel> findAllByIssuerId(Long issuerId);
     List<CertificateModel> findAllByOrderByIdDesc();
 
+    List<CertificateModel> findAllByIssuerIdAndRevokedFalse(Long issuerId);
+
+    boolean existsByIssuerIdAndRevokedFalse(Long issuerId);
+
 }
