@@ -193,6 +193,60 @@ public class PkiService {
         return saved;
     }
 
+    //IZDAVANJE EE SERITFIKATA OD CA USERA SA PREDEFINISANOM ORGANIZACIJOM
+    @Transactional
+    public CertificateModel issueEndEntitycreateCAuser(EeRequest req) throws Exception {
+        CertificateModel issuerE = repo.findById(req.getIssuerId())
+                .orElseThrow(() -> new IllegalArgumentException("Issuer not found: " + req.getIssuerId()));
+
+        // 1) Validacija izdavaoca: ne povučen, ne istekao, i da je CA (BasicConstraints true)
+        if (issuerE.isRevoked()) throw new IllegalStateException("Issuer is revoked");
+        if (issuerE.getNotAfter().isBefore(LocalDateTime.now())) throw new IllegalStateException("Issuer expired");
+        X509Certificate issuerCert = PemUtil.pemToCert(issuerE.getCertificatePem());
+        if (!isCa(issuerCert)) throw new IllegalStateException("Issuer is not a CA certificate");
+
+        // 2) Validnost EE ne sme preći važenje izdavaoca
+        int days = req.getValidityDays();
+        Date nb = new Date();
+        Date na = dateAfterDays(days);
+        if (na.toInstant().isAfter(issuerCert.getNotAfter().toInstant())) {
+            // Skrati na maksimalno dozvoljeno
+            na = issuerCert.getNotAfter();
+        }
+
+        // 3) Generiši par ključeva za EE
+        int keySize = Optional.ofNullable(req.getKeySize()).orElse(2048);
+        KeyPair eeKeys = generateKeypair("RSA", keySize);
+
+        X500Name subject = buildX500WithUserOrganization(req.getSubject()).build();
+        PrivateKey issuerKey = crypto.decryptPrivateKey(issuerE.getPrivateKeyEnc());
+
+        BigInteger serial = new BigInteger(160, new SecureRandom());
+        var spki = SubjectPublicKeyInfo.getInstance(eeKeys.getPublic().getEncoded());
+        var issuerX500 = X500Name.getInstance(issuerCert.getSubjectX500Principal().getEncoded());
+
+        JcaX509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(
+                issuerX500, serial, nb, na, subject, spki);
+
+        // Dodaj ekstenzije za EE (uključuje digitalSignature)
+        applyExtensionsForEE(b, eeKeys.getPublic(), issuerCert, req.getExtensions());
+
+        var signer = new JcaContentSignerBuilder("SHA256withRSA").build(issuerKey);
+        X509CertificateHolder holder = b.build(signer);
+        X509Certificate eeCert = new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
+        CertificateModel e = new CertificateModel();
+        e.setType(EE);
+        e.setSerialNumber(eeCert.getSerialNumber().toString());
+        e.setCertificatePem(PemUtil.certToPem(eeCert));
+        e.setPrivateKeyEnc(crypto.encryptPrivateKey(eeKeys.getPrivate()));
+        e.setNotBefore(toLdt(eeCert.getNotBefore()));
+        e.setNotAfter(toLdt(eeCert.getNotAfter()));
+        e.setIssuer(issuerE);
+
+        CertificateModel saved = repo.save(e);
+
+        return saved;
+    }
 
     // Preuzimanje sertifikata u .p12
     @Transactional(readOnly = true)

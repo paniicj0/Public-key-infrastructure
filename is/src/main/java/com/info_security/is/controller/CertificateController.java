@@ -50,6 +50,13 @@ public class CertificateController {
         return ResponseEntity.ok(new CertificateResponse(saved));
     }
 
+    //KREIRA GA CA USER EE TEST
+    @PostMapping("/caUser-create-ee")
+    public ResponseEntity<CertificateResponse> issueEEcreateByCaUser(@Valid @RequestBody EeRequest req) throws Exception {
+        CertificateModel saved = pkiService.issueEndEntitycreateCAuser(req);
+        return ResponseEntity.ok(new CertificateResponse(saved));
+    }
+
 
     // -------------------------- PREUZIMANJE SERTIFIKATA -------------------------------------------
 

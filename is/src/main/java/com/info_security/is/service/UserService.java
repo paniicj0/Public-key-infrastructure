@@ -30,15 +30,22 @@ public class UserService  implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        Optional<User> userOptional = userRepository.findByEmail(username);
+        User user = userRepository.findByEmail(username)
+                .orElseThrow(() -> new UsernameNotFoundException(
+                        String.format("No user found with username '%s'.", username)));
 
-        if (userOptional.isEmpty()) {
-            throw new UsernameNotFoundException(String.format("No user found with username '%s'.", username));
-        }
 
-        User user = userOptional.get();
-        return user;
+        return org.springframework.security.core.userdetails.User
+                .withUsername(user.getEmail())       // ← ovo će ići u JWT kao sub
+                .password(user.getPassword())        // hashirana lozinka
+                .authorities(user.getRole().name())              // npr. ROLE_CA ili ROLE_ADMIN
+                .accountExpired(false)
+                .accountLocked(false)
+                .credentialsExpired(false)
+                .disabled(!user.isActive())
+                .build();
     }
+
 
     @Transactional
     public void verifyUser(Long userId) {
