@@ -153,7 +153,7 @@ public class UserController {
 
 
 
-    public record LoginResponse(String token, String role) {}
+   /* public record LoginResponse(String token, String role) {}
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@RequestBody AuthenticationRequest req) {
@@ -170,7 +170,7 @@ public class UserController {
         String jwt = tokenUtils.generateToken(user.getEmail());
         return ResponseEntity.ok(new LoginResponse(jwt, user.getRole().toString()));
     }
-
+*/
 
     @GetMapping("/role")
     public ResponseEntity<String> getRole() {

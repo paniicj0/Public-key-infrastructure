@@ -1,5 +1,6 @@
 package com.info_security.is.verification;
 
+import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,36 +27,32 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
-        HttpServletRequest httpServletRequest = (HttpServletRequest) request;
-        String token = httpServletRequest.getHeader("Authorization");
-        System.out.println("------------------------ima token");
-        if(token != null){
-            if(token.startsWith("Bearer ")){
-                token = token.substring(7);
-            }
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
+
+        String authHeader = request.getHeader("Authorization");
+        String token = (authHeader != null && authHeader.startsWith("Bearer ")) ? authHeader.substring(7) : null;
+
+        if (token != null) {
+            try {
+                if (tokenVerify.isAccess(token)) {
+                    String username = tokenVerify.getUsername(token);
+                    if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                        UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                        UsernamePasswordAuthenticationToken auth =
+                                new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                        auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(auth);
+                    }
+                }
+            } catch (ExpiredJwtException ex) {
+                // ništa – pusti 401 iz entry point-a
+            } catch (Exception ignore) {}
         }
-        System.out.println("--------------------Token je:" + token);
 
-        String username = tokenVerify.getUsernameFromToken(token);
-        System.out.println("--------------------username:" + username);
-
-        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            System.out.println("--------------------Usao u if");
-            UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
-            if (tokenVerify.validateToken(token, userDetails)) {
-                System.out.println("--------------------Token verified:" );
-                UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                        userDetails, null, userDetails.getAuthorities()
-                );
-
-                auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(httpServletRequest));
-                SecurityContextHolder.getContext().setAuthentication(auth);
-                System.out.println("--------------------security context set:" + auth.toString());
-            }
-        }
-        filterChain.doFilter(request, response);
+        chain.doFilter(request, response);
     }
+
 
 }
 

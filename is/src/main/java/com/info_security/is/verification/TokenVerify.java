@@ -1,86 +1,99 @@
 package com.info_security.is.verification;
 
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.io.Encoders;
+import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.ExpiredJwtException;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.security.Keys;
-
 
 @Component
 public class TokenVerify {
 
-    @Value("PKI")
-    private String appName;
+    // Preferiraj base64; ako nije zadat, koristi raw
+    @Value("${app.jwt.secret.base64:}")
+    private String secretB64;
 
-    @Value("someSecretKeyHereThatIsLongEnoughsomeSecretKeyHereThatIsLongEnoughsomeSecretKeyHereThatIsLongEnough")
-    public String secret;
+    @Value("${app.jwt.secret.raw:}")
+    private String secretRaw;
 
-    @Value("9900000")
-    private Long expiresIn;
+    @Value("${app.jwt.access.expires-in-ms:900000}")
+    private long accessExpiresInMs;
 
-    @Value("Authorization")
-    private String authorizationHeader;
+    @Value("${app.jwt.refresh.expires-in-ms:1209600000}")
+    private long refreshExpiresInMs;
 
-    private static final String audienceWeb="web";
+    private static final String CLAIM_TYPE = "typ";
+    private static final String TYPE_ACCESS = "access";
+    private static final String TYPE_REFRESH = "refresh";
 
-    private SignatureAlgorithm signatureAlgorithm = SignatureAlgorithm.HS512;
+    private SecretKey cachedKey;
 
+    @PostConstruct
+    void init() {
+        this.cachedKey = resolveKey();
+        // Informativno logovanje (nije obavezno)
+        int bitLen = this.cachedKey.getEncoded().length * 8;
+        if (bitLen < 512) {
+            throw new IllegalStateException("JWT key too short for HS512: " + bitLen + " bits. Provide >= 512 bits.");
+        }
+        System.out.println("[JWT] HS512 key is OK (" + bitLen + " bits).");
+    }
 
-    public String generateToken(String username) {
+    private SecretKey resolveKey() {
+        if (secretB64 != null && !secretB64.isBlank()) {
+            byte[] bytes = Decoders.BASE64.decode(secretB64);
+            return Keys.hmacShaKeyFor(bytes);
+        }
+        if (secretRaw != null && !secretRaw.isBlank()) {
+            // ako baš koristiš raw string, neka bude 64+ bajta
+            byte[] bytes = secretRaw.getBytes(StandardCharsets.UTF_8);
+            return Keys.hmacShaKeyFor(bytes);
+        }
+        // ako ništa nije zadato, generiši i ispiši base64 da korisnik može da prekopira u properties
+        SecretKey k = Keys.secretKeyFor(SignatureAlgorithm.HS512);
+        String generated = Encoders.BASE64.encode(k.getEncoded());
+        System.err.println("[JWT] No key provided. Generated one-time Base64 key below.\n" +
+                "Put this in application.properties:\napp.jwt.secret.base64=" + generated);
+        return k;
+    }
+
+    public String generateAccessToken(String username) {
         return Jwts.builder()
-                .setIssuer("PKI") // Set your app name
+                .setIssuer("PKI")
                 .setSubject(username)
-                .setAudience(audienceWeb)
-                .setIssuedAt(new Date(System.currentTimeMillis()))
-                .setExpiration(generateExpirationDate())
-                .signWith(Keys.hmacShaKeyFor(secret.getBytes()), signatureAlgorithm) // Use proper key
+                .claim(CLAIM_TYPE, TYPE_ACCESS)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + accessExpiresInMs))
+                .signWith(cachedKey, SignatureAlgorithm.HS512)
                 .compact();
     }
 
-    private Date generateExpirationDate() {
-        return new Date(System.currentTimeMillis() + expiresIn);
+    public String generateRefreshToken(String username) {
+        return Jwts.builder()
+                .setIssuer("PKI")
+                .setSubject(username)
+                .claim(CLAIM_TYPE, TYPE_REFRESH)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + refreshExpiresInMs))
+                .signWith(cachedKey, SignatureAlgorithm.HS512)
+                .compact();
     }
 
-    public String getUsernameFromToken(String token) {
-        String username;
-        try {
-            final Claims claims = getAllClaimsFromToken(token);
-            username = claims.getSubject();
-        } catch (ExpiredJwtException ex) {
-            throw ex;
-        } catch (Exception e) {
-            username = null;
-        }
-        return username;
+    public Claims parse(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(cachedKey)
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
     }
 
-    private Claims getAllClaimsFromToken(String token) {
-        Claims claims;
-        try {
-            claims = Jwts.parserBuilder()
-                    .setSigningKey(Keys.hmacShaKeyFor(secret.getBytes())) // Use proper key
-                    .build()
-                    .parseClaimsJws(token)
-                    .getBody();
-        } catch (ExpiredJwtException ex) {
-            throw ex;
-        } catch (Exception e) {
-            claims = null;
-        }
-        return claims;
-    }
-
-    public Boolean validateToken(String token, UserDetails userDetails) {
-        final String username = getUsernameFromToken(token);
-        return username != null ;//&& username.equals(userDetails.getUsername()) && !isTokenExpired(token);
-    }
-
+    public String getUsername(String token) { return parse(token).getSubject(); }
+    public boolean isAccess(String token)   { return TYPE_ACCESS.equals(parse(token).get(CLAIM_TYPE)); }
+    public boolean isRefresh(String token)  { return TYPE_REFRESH.equals(parse(token).get(CLAIM_TYPE)); }
 }
-

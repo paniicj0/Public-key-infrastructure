@@ -89,14 +89,13 @@ public class WebConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/register/users").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/login", "/api/refresh").permitAll()
                         .requestMatchers("/api/me","/api/login", "/api/verify/users/*", "/api/activation/verify/**", "/api/activation/verify").permitAll()
                         .requestMatchers("/h2/**", "/socket/**", "/error").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated()
                 )
-                // tvoj provider
                 .authenticationProvider(authenticationProvider())
-                // JWT filter pre UsernamePasswordAuthenticationFilter
                 .addFilterBefore(new TokenAuthenticationFilter(tokenUtils, userDetailsService()),
                         UsernamePasswordAuthenticationFilter.class);
 
