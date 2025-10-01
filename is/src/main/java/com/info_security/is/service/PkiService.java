@@ -18,6 +18,7 @@ import org.bouncycastle.asn1.x500.style.BCStyle;
 import org.bouncycastle.asn1.x500.style.IETFUtils;
 import org.bouncycastle.asn1.x509.*;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
@@ -658,8 +659,6 @@ public class PkiService {
 
         var params = new java.security.cert.PKIXParameters(java.util.Set.of(anchor));
         params.setRevocationEnabled(false);
-        // (opciono) Ako koristiš BC:
-        // params.setSigProvider("BC");
 
         java.security.cert.CertPathValidator.getInstance("PKIX").validate(cp, params);
     }
@@ -730,7 +729,6 @@ public class PkiService {
         e.setNotBefore(toLdt(caCert.getNotBefore()));
         e.setNotAfter(toLdt(caCert.getNotAfter()));
         e.setIssuer(issuerE);
-        // ako tvoj model ima polje keyCertSign, ovde bi bilo: e.setKeyCertSign(true);
 
         return repo.save(e);
     }
@@ -756,11 +754,8 @@ public class PkiService {
     }
 
     // === 4.1. Izdavanje iz CSR ===
-    // PkiService.java
-
     @Transactional
     public Long issueFromCsr(Long issuerId, int validityDays, String csrPem) throws Exception {
-        // 0) Učitaj CA izdavaoca
         var ca = repo.findById(issuerId)
                 .orElseThrow(() -> new IllegalArgumentException("Issuer not found"));
         var caCert = PemUtil.readX509(ca.getCertificatePem());
@@ -825,23 +820,20 @@ public class PkiService {
         return null;
     }
 
-
-
     private static LocalDateTime toLocalDateTime(Date date) {
         return date.toInstant()
                 .atZone(ZoneId.systemDefault())
                 .toLocalDateTime();
     }
 
-
-    // === 4.2. Autogenerate ===
     @Transactional
     public IssuedAutogenResult issueAutogen(Long issuerId, int validityDays, int keySize, SubjectDtoRecord subj,
                                             boolean returnP12, String p12Password) throws Exception {
         var ca = repo.findCAById(issuerId)
                 .orElseThrow(() -> new IllegalArgumentException("CA not found"));
         var caCert = PemUtil.readX509(ca.getCertificatePem());
-        var caKey  = PemUtil.readPrivateKey(ca.getPrivateKeyEnc()); // dekripcija ako treba
+        //var caKey  = PemUtil.readPrivateKey(ca.getPrivateKeyEnc()); // dekripcija ako treba
+        var caKey  = crypto.decryptPrivateKey(ca.getPrivateKeyEnc());
 
         if (!ca.isCa()) throw new IllegalArgumentException("Selected issuer is not a CA");
         var now = new Date();
@@ -850,7 +842,6 @@ public class PkiService {
         if (eeNotAfter.after(caCert.getNotAfter()))
             throw new IllegalArgumentException("EE validity exceeds CA validity");
 
-        // keypair
         var kp = KeyPairGenerator.getInstance("RSA").generateKeyPair();
         var subject = CsrUtil.x500(subj.commonName(), subj.organization(), subj.orgUnit(), subj.country(), subj.email());
 
@@ -877,7 +868,6 @@ public class PkiService {
         return new IssuedAutogenResult(entity.getId(), p12);
     }
 
-    // === helpers ===
 
     private X509Certificate buildAndSignEEFromCsr(
             PKCS10CertificationRequest csr,
@@ -902,7 +892,6 @@ public class PkiService {
         return new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
     }
 
-
     private X509Certificate buildAndSignEE(
             X500Name subject, PublicKey eePub,
             X509Certificate issuerCert, PrivateKey issuerKey,
@@ -911,9 +900,9 @@ public class PkiService {
         var serial = new BigInteger(160, SecureRandom.getInstanceStrong()).abs();
 
         var builder = new JcaX509v3CertificateBuilder(
-                issuerCert,              // ili koristi issuer X500Name overload – oba rade
+                issuerCert,
                 serial, notBefore, notAfter,
-                subject,                 // <-- prosledi X500Name direktno
+                subject,
                 eePub
         );
 
@@ -932,7 +921,6 @@ public class PkiService {
         b.addExtension(Extension.keyUsage, true, new KeyUsage(
                 KeyUsage.digitalSignature | KeyUsage.keyEncipherment
         ));
-        // (opciono) EKU, SAN…
         if (csr != null) {
             var attrs = csr.getAttributes(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest);
             if (attrs != null && attrs.length > 0) {
@@ -941,11 +929,152 @@ public class PkiService {
                 if (san != null) {
                     b.addExtension(Extension.subjectAlternativeName, san.isCritical(), san.getParsedValue());
                 }
-                // EKU itd… filtriraj po politici
+
             }
         }
     }
 
     public record IssuedAutogenResult(Long id, byte[] p12Bytes) {}
+
+    @Transactional(readOnly = true)
+    public byte[] packPkcs12ForCsrIssued(Long certId, String privateKeyPem, String p12Password) throws Exception {
+        if (p12Password == null || p12Password.isBlank()) {
+            throw new IllegalArgumentException("p12 password required");
+        }
+        // 1) uzmi EE iz baze
+        CertificateModel e = repo.findById(certId)
+                .orElseThrow(() -> new IllegalArgumentException("Certificate not found"));
+
+        // 2) izgradi lanac (EE -> ... -> ROOT)
+        var chain = buildChain(e).toArray(new java.security.cert.X509Certificate[0]);
+
+        // 3) privatni ključ iz PEM-a (ne čuvamo u bazi!)
+        PrivateKey pk = PemUtil.readPrivateKey(privateKeyPem);
+        assertKeyMatchesLeaf(pk, chain[0]); // sigurnosna provera
+
+        // 4) spakuj .p12 (alias "key")
+        return Keystores.toPkcs12(chain[0], pk, chain, p12Password.toCharArray());
+    }
+
+    @Transactional(readOnly = true)
+    public List<CertificateResponse> listEligibleIssuersForCurrentUser() {
+        var now = LocalDateTime.now();
+        var me = userService.getCurrentUser();
+        if (me == null) throw new SecurityException("User not authenticated");
+
+        // 1) uzmi sve CA koji su validni i nisu povučeni
+        var all = repo.findAllByOrderByIdDesc().stream()
+                .filter(c -> c.getType() == CertifaceteType.CA)
+                .filter(c -> !Boolean.TRUE.equals(c.isRevoked()))
+                .filter(c -> (c.getNotBefore() == null || !c.getNotBefore().isAfter(now))
+                        && (c.getNotAfter()  == null || !c.getNotAfter().isBefore(now)))
+                .toList();
+
+        // 2) filtriraj po ulozi
+        if (me.getRole() == UserRole.ADMIN) {
+            return all.stream().map(CertificateResponse::new).toList();
+        }
+        if (me.getRole() == UserRole.CA) {
+            String org = userService.getCurrentUserOrganization();
+            return all.stream().filter(ca -> {
+                try {
+                    var cert = PemUtil.pemToCert(ca.getCertificatePem());
+                    var subj = cert.getSubjectX500Principal().getName();
+                    return subj.contains("O=" + org);
+                } catch (Exception e) { return false; }
+            }).map(CertificateResponse::new).toList();
+        }
+        // USER → dozvoli sve javne CA (ili, ako hoćeš strože, filtriraj po nekom kriterijumu)
+        return all.stream().map(CertificateResponse::new).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<CertificateResponse> listMyCertificates() {
+        User me = userService.getCurrentUser();
+        if (me == null) throw new SecurityException("User not authenticated");
+
+        var all = repo.findAllByOrderByIdDesc();
+
+        // CA → u svom lancu / organizaciji
+        if (me.getRole() == UserRole.CA) {
+            String org = userService.getCurrentUserOrganization();
+            return all.stream()
+                    .filter(c -> belongsToOrgChain(c, org))   // ⬅⬅⬅ promenjen filter
+                    .map(CertificateResponse::new)
+                    .toList();
+        }
+
+
+        // USER → njegovi EE po email-u iz subject/SAN
+        return repo.findAllByOrderByIdDesc().stream()
+                .filter(c -> c.getType() == CertifaceteType.EE && eeBelongsToUserNew(me, c))
+                .map(CertificateResponse::new)
+                .toList();
+
+    }
+
+    // robustno: prolazi uzlazno kroz chain: node -> issuer -> issuer...
+    private boolean belongsToOrgChain(CertificateModel node, String org) {
+        if (org == null || org.isBlank()) return false;
+        String wanted = org.trim().toLowerCase(java.util.Locale.ROOT);
+        try {
+            CertificateModel cur = node;
+            while (cur != null) {
+                X509Certificate cert = PemUtil.pemToCert(cur.getCertificatePem());
+                var x5 = new org.bouncycastle.cert.jcajce.JcaX509CertificateHolder(cert).getSubject();
+                String o = getRdnStringNew(x5, BCStyle.O);
+                if (o != null && o.trim().toLowerCase(java.util.Locale.ROOT).equals(wanted)) {
+                    return true;
+                }
+                cur = cur.getIssuer();
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean eeBelongsToUserNew(User user, CertificateModel ee) {
+        if (ee.getType() != CertifaceteType.EE) return false;
+        try {
+            X509Certificate cert = PemUtil.pemToCert(ee.getCertificatePem());
+            String userMail = safeLower(user.getEmail());
+            String certMail = safeLower(extractEmailRobust(cert));
+            return certMail != null && certMail.equals(userMail);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private String extractEmailRobust(X509Certificate cert) throws Exception {
+        X500Name x500 = new JcaX509CertificateHolder(cert).getSubject();
+        String dnEmail = getRdnStringNew(x500, BCStyle.EmailAddress); // OID za email
+        if (dnEmail != null && !dnEmail.isBlank()) return dnEmail;
+
+        var sans = cert.getSubjectAlternativeNames();
+        if (sans != null) {
+            for (var san : sans) {
+                Integer type = (Integer) san.get(0);
+                if (type != null && type == 1) {
+                    return String.valueOf(san.get(1));
+                }
+            }
+        }
+        return null;
+    }
+
+    private String getRdnStringNew(org.bouncycastle.asn1.x500.X500Name subject,
+                                   org.bouncycastle.asn1.ASN1ObjectIdentifier oid) {
+        var rdns = subject.getRDNs(oid);
+        if (rdns != null && rdns.length > 0) {
+            return org.bouncycastle.asn1.x500.style.IETFUtils.valueToString(
+                    rdns[0].getFirst().getValue());
+        }
+        return null;
+    }
+
+    private String safeLower(String s) {
+        return s == null ? null : s.trim().toLowerCase(java.util.Locale.ROOT);
+    }
 
 }
