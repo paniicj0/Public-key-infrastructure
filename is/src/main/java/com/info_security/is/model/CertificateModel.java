@@ -44,4 +44,9 @@ public class CertificateModel {
 
     private LocalDateTime revokedAt;
     private Long revokedByUserId;
+
+    public boolean isCa() {
+        return this.type == CertifaceteType.CA || this.type == CertifaceteType.ROOT;
+    }
+
 }
