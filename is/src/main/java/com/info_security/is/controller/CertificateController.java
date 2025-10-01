@@ -108,6 +108,16 @@ public class CertificateController {
         return pkiService.listCertificatesCA();
     }
 
+
+    // --------------------- POVLACENJE -------------------------
+    @PostMapping("/{id}/revoke")
+    public ResponseEntity<RevokeResponse> revoke(@PathVariable Long id, @RequestBody RevokeRequest req) {
+        CertificateModel saved = pkiService.revoke(id, req != null ? req.getReason() : null);
+        return ResponseEntity.ok(
+                new RevokeResponse(saved.getId(), saved.isRevoked(), saved.getRevocationReason(),
+                        saved.getRevokedAt() != null ? saved.getRevokedAt().toString() : null)
+        );
+    }
 }
 
 

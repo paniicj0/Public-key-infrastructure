@@ -11,6 +11,7 @@ import java.util.Optional;
 public interface CertificateRepository extends JpaRepository<CertificateModel, Long> {
     List<CertificateModel> findAllByOrderByIdDesc();
 
+
     @Query("""
        select c from CertificateModel c
        join fetch c.issuer i
@@ -32,6 +33,9 @@ public interface CertificateRepository extends JpaRepository<CertificateModel, L
     """)
     List<CertificateModel> findAllIssuedBy(@Param("issuerId") Long issuerId);
 
+    List<CertificateModel> findAllByIssuerIdAndRevokedFalse(Long issuerId);
+
+    boolean existsByIssuerIdAndRevokedFalse(Long issuerId);
 
 
 }

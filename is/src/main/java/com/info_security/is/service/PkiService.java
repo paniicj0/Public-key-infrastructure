@@ -3,6 +3,7 @@ import com.info_security.is.crypto.CsrUtil;
 import com.info_security.is.crypto.Keystores;
 import com.info_security.is.dto.*;
 import com.info_security.is.enums.CertifaceteType;
+import com.info_security.is.enums.RevocationReason;
 import com.info_security.is.enums.UserRole;
 import com.info_security.is.model.CertificateModel;
 import com.info_security.is.crypto.CryptoUtil;
@@ -27,6 +28,7 @@ import org.bouncycastle.asn1.x500.X500Name;
 
 import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -397,20 +399,87 @@ public class PkiService {
         return out; // samo to!
     }
 
-    // TODO - REVOKE
-//    @Transactional
-//    public CertificateModel revoke(Long certId, RevocationReason reason, Long actorUserId) {
-//        CertificateModel e = repo.findById(certId)
-//                .orElseThrow(() -> new IllegalArgumentException("Certificate not found"));
-//
-//        if (e.isRevoked()) return e;
-//
-//        e.setRevoked(true);
-//        e.setRevocationReason(reason);
-//        e.setRevokedAt(LocalDateTime.now());
-//        e.setRevokedByUserId(actorUserId);
-//        return repo.save(e);
-//    }
+    // ------------------------ REVOCATION -------------------------------------------------
+    // REVOKE – core pravila:
+    // ADMIN: može sve
+    // CA: sme u svom lancu (po organizaciji); uprošćeno – dozvoli ako je O=org korisnika u subject ili jednom od predaka
+    // USER (običan): sme samo svoje EE
+    @Transactional
+    public CertificateModel revoke(Long certId, RevocationReason reason) {
+        User actor = userService.getCurrentUser();
+        if (actor == null) throw new SecurityException("User not authenticated");
+
+        CertificateModel cert = repo.findById(certId)
+                .orElseThrow(() -> new IllegalArgumentException("Certificate not found"));
+
+        if (Boolean.TRUE.equals(cert.isRevoked())) {
+            return cert; // idempotentno
+        }
+
+        // dozvole
+        if (!canRevoke(actor, cert)) {
+            throw new AccessDeniedException("You are not allowed to revoke this certificate");
+        }
+
+         if (cert.getType() == CertifaceteType.CA && repo.existsByIssuerIdAndRevokedFalse(cert.getId())) {
+             throw new IllegalStateException("CA certificate has active descendants; revoke them first.");
+         }
+
+        cert.setRevoked(true);
+        cert.setRevocationReason(reason != null ? reason : RevocationReason.UNSPECIFIED);
+        cert.setRevokedAt(LocalDateTime.now());
+        cert.setRevokedByUserId(actor.getId());
+
+        return repo.save(cert);
+    }
+
+    /** Pravila pristupa za revoke */
+    private boolean canRevoke(User actor, CertificateModel target) {
+        // ADMIN može sve
+        if (actor.getRole() == UserRole.ADMIN) return true;
+
+        // Običan korisnik: može samo svoje EE (pretpostavka da imaš vezu user <-> EE; ako nemaš, upotrebi email iz subject-a)
+        if (actor.getRole() == UserRole.USER) {
+            if (target.getType() != CertifaceteType.EE) return false;
+            return eeBelongsToUser(actor, target);
+        }
+
+        // CA korisnik: dozvoljeno u okviru svog lanca/organizacije
+        if (actor.getRole() == UserRole.CA) {
+            String org = userService.getCurrentUserOrganization();
+            return isInUsersOrgChain(org, target);
+        }
+
+        return false;
+    }
+
+    /** Provera da li EE "pripada" korisniku – prilagodi tvojoj šemi (npr. preko ownerUserId, email-a iz subjecta, itd.) */
+    private boolean eeBelongsToUser(User user, CertificateModel ee) {
+        if (ee.getType() != CertifaceteType.EE) return false;
+        try {
+            X509Certificate c = PemUtil.pemToCert(ee.getCertificatePem());
+            String subj = c.getSubjectX500Principal().getName(); // e.g. "CN=..., E=...,..."
+            return subj.contains("E=" + user.getEmail());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean isInUsersOrgChain(String org, CertificateModel node) {
+        try {
+            CertificateModel cur = node;
+            while (cur != null) {
+                X509Certificate cert = PemUtil.pemToCert(cur.getCertificatePem());
+                String subj = cert.getSubjectX500Principal().getName();
+                // gruba provera na osnovu DN; po potrebi zameni pravim X500 parserom
+                if (subj.contains("O=" + org)) return true;
+                cur = cur.getIssuer();
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     /* ======== Helpers ======== */
 
