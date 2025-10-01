@@ -1,4 +1,6 @@
 package com.info_security.is.service;
+import com.info_security.is.crypto.CsrUtil;
+import com.info_security.is.crypto.Keystores;
 import com.info_security.is.dto.*;
 import com.info_security.is.enums.CertifaceteType;
 import com.info_security.is.enums.RevocationReason;
@@ -8,27 +10,29 @@ import com.info_security.is.crypto.CryptoUtil;
 import com.info_security.is.crypto.PemUtil;
 import com.info_security.is.model.User;
 import com.info_security.is.repository.CertificateRepository;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.asn1.x500.RDN;
 import org.bouncycastle.asn1.x500.X500NameBuilder;
 import org.bouncycastle.asn1.x500.style.BCStyle;
-import org.bouncycastle.asn1.x509.Extension;
-import org.bouncycastle.asn1.x509.BasicConstraints;
-import org.bouncycastle.asn1.x509.KeyUsage;
+import org.bouncycastle.asn1.x500.style.IETFUtils;
+import org.bouncycastle.asn1.x509.*;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
-import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
-import org.bouncycastle.asn1.x509.SubjectKeyIdentifier;
-import org.bouncycastle.asn1.x509.AuthorityKeyIdentifier;
 import org.bouncycastle.asn1.x500.X500Name;
 
+import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.security.auth.x500.X500Principal;
 import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
 import java.security.*;
@@ -47,13 +51,16 @@ public class PkiService {
     private final CertificateRepository repo;
     private final CryptoUtil crypto;
 
+    private final CsrUtil csrUtil;
+
     @Autowired
     private UserService userService;
 
 
-    public PkiService(CertificateRepository repo, CryptoUtil crypto) {
+    public PkiService(CertificateRepository repo, CryptoUtil crypto, CsrUtil csrUtil) {
         this.repo = repo;
         this.crypto = crypto;
+        this.csrUtil = csrUtil;
         // osiguraj BC providera
         if (Security.getProvider("BC") == null) {
             Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
@@ -488,26 +495,6 @@ public class PkiService {
         return b;
     }
 
-//    private Date parseStart(String iso) { return Date.from(OffsetDateTime.parse(iso).toInstant()); }
-//    private Date parseEnd(String iso) { return Date.from(OffsetDateTime.parse(iso).toInstant()); }
-
-//    private KeyPair generateKeyPair(String keyAlg, Integer keySize) throws Exception {
-//        if ("EC".equalsIgnoreCase(keyAlg)) {
-//            KeyPairGenerator kpg = KeyPairGenerator.getInstance("EC");
-//            kpg.initialize(256);
-//            return kpg.generateKeyPair();
-//        } else {
-//            KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
-//            kpg.initialize(keySize != null ? keySize : 3072);
-//            return kpg.generateKeyPair();
-//        }
-//    }
-
-//    private BigInteger randomSerial() {
-//        return new BigInteger(160, new SecureRandom()).abs();
-//    }
-
-
     // Da li je izdavaoc sertifikata validan
     private void assertIssuerIsValid(CertificateModel issuer) throws Exception {
         // 1) vreme
@@ -535,18 +522,6 @@ public class PkiService {
             throw new IllegalArgumentException("Issuer lacks keyCertSign usage.");
     }
 
-//
-//    private X509Certificate toJavaCert(X509CertificateHolder holder) throws Exception {
-//        return new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
-//    }
-//
-//    private String toPem(X509Certificate cert) throws Exception {
-//        String b64 = Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(cert.getEncoded());
-//        return "-----BEGIN CERTIFICATE-----\n" + b64 + "\n-----END CERTIFICATE-----\n";
-//    }
-
-
-
     // Provera da li je samo potpisan
     private boolean isSelfSigned(X509Certificate cert) {
         try {
@@ -556,13 +531,6 @@ public class PkiService {
             return false;
         }
     }
-
-//    private List<X509Certificate> stripRootIfPresent(List<X509Certificate> chain) {
-//        if (chain.size() >= 2 && isSelfSigned(chain.get(chain.size() - 1))) {
-//            return new ArrayList<>(chain.subList(0, chain.size() - 1)); // bez root-a
-//        }
-//        return chain;
-//    }
 
     private void assertChainSignature(List<X509Certificate> chain) throws Exception {
         for (int i = 0; i < chain.size() - 1; i++) {
@@ -787,5 +755,197 @@ public class PkiService {
         return b;
     }
 
+    // === 4.1. Izdavanje iz CSR ===
+    // PkiService.java
+
+    @Transactional
+    public Long issueFromCsr(Long issuerId, int validityDays, String csrPem) throws Exception {
+        // 0) Učitaj CA izdavaoca
+        var ca = repo.findById(issuerId)
+                .orElseThrow(() -> new IllegalArgumentException("Issuer not found"));
+        var caCert = PemUtil.readX509(ca.getCertificatePem());
+
+        if (caCert.getBasicConstraints() < 0) {
+            throw new IllegalArgumentException("Selected issuer is not a CA");
+        }
+        var now = new Date();
+        if (caCert.getNotAfter().before(now)) throw new IllegalArgumentException("CA expired");
+
+        // 1) Parsiraj CSR i verifikuj ga
+        var csr = csrUtil.parseCsrPem(csrPem);                 // PKCS10CertificationRequest
+        if (!csrUtil.verifyCsrSignature(csr)) {
+            throw new IllegalArgumentException("CSR signature invalid");
+        }
+
+        // 2) Ako je CA korisnik, enforce-uj organizaciju (O) iz CSR-a
+        var current = userService.getCurrentUser();
+        if (current == null) throw new SecurityException("User not authenticated");
+
+        var csrOrg = getRdnString(csr.getSubject(), BCStyle.O); // npr. "MyOrg"
+        if ("CA".equalsIgnoreCase(current.getRole().name())) {
+            var userOrg = current.getOrganization() != null ? current.getOrganization().getName() : null;
+            if (userOrg == null || csrOrg == null || !userOrg.equals(csrOrg)) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.FORBIDDEN,
+                        "CA može izdavati samo za svoju organizaciju (CSR O=" + csrOrg + ", očekivano O=" + userOrg + ")"
+                );
+            }
+        }
+
+        // 3) Validnost EE ne sme preći važenje CA
+        var eeNotBefore = now;
+        var eeNotAfter  = new Date(now.getTime() + (long)validityDays * 86_400_000L);
+        if (eeNotAfter.after(caCert.getNotAfter())) {
+            eeNotAfter = caCert.getNotAfter();
+        }
+
+        // 4) Potpiši EE iz CSR-a CA ključem
+        var caKey = crypto.decryptPrivateKey(ca.getPrivateKeyEnc());  // ⬅⬅⬅ ovo je ključno!
+        var ee = buildAndSignEEFromCsr(csr, caCert, caKey, eeNotBefore, eeNotAfter);
+
+        // 5) Upis u bazu (CSR režim -> ne čuvamo privatni ključ)
+        var entity = new CertificateModel();
+        entity.setType(CertifaceteType.EE);
+        entity.setIssuer(ca);
+        entity.setCertificatePem(PemUtil.writeX509(ee));
+        entity.setNotBefore(toLocalDateTime(ee.getNotBefore()));
+        entity.setNotAfter(toLocalDateTime(ee.getNotAfter()));
+        entity.setSerialNumber(ee.getSerialNumber().toString(16));
+        entity.setPrivateKeyEnc(null); // CSR varijanta – privatni ključ ostaje kod korisnika
+
+        repo.save(entity);
+        return entity.getId();
+    }
+
+    public String getRdnString(X500Name subject, ASN1ObjectIdentifier oid) {
+        RDN[] rdns = subject.getRDNs(oid);
+        if (rdns != null && rdns.length > 0) {
+            return IETFUtils.valueToString(rdns[0].getFirst().getValue());
+        }
+        return null;
+    }
+
+
+
+    private static LocalDateTime toLocalDateTime(Date date) {
+        return date.toInstant()
+                .atZone(ZoneId.systemDefault())
+                .toLocalDateTime();
+    }
+
+
+    // === 4.2. Autogenerate ===
+    @Transactional
+    public IssuedAutogenResult issueAutogen(Long issuerId, int validityDays, int keySize, SubjectDtoRecord subj,
+                                            boolean returnP12, String p12Password) throws Exception {
+        var ca = repo.findCAById(issuerId)
+                .orElseThrow(() -> new IllegalArgumentException("CA not found"));
+        var caCert = PemUtil.readX509(ca.getCertificatePem());
+        var caKey  = PemUtil.readPrivateKey(ca.getPrivateKeyEnc()); // dekripcija ako treba
+
+        if (!ca.isCa()) throw new IllegalArgumentException("Selected issuer is not a CA");
+        var now = new Date();
+        var eeNotBefore = now;
+        var eeNotAfter  = new Date(now.getTime() + validityDays * 86_400_000L);
+        if (eeNotAfter.after(caCert.getNotAfter()))
+            throw new IllegalArgumentException("EE validity exceeds CA validity");
+
+        // keypair
+        var kp = KeyPairGenerator.getInstance("RSA").generateKeyPair();
+        var subject = CsrUtil.x500(subj.commonName(), subj.organization(), subj.orgUnit(), subj.country(), subj.email());
+
+        var ee = buildAndSignEE(subject, kp.getPublic(), caCert, caKey, eeNotBefore, eeNotAfter);
+
+        // persist (bez privatnog ključa)
+        var entity = new CertificateModel();
+        entity.setType(CertifaceteType.EE);
+        entity.setIssuer(ca);
+        entity.setCertificatePem(PemUtil.writeX509(ee));
+        entity.setNotBefore(toLocalDateTime(ee.getNotBefore()));
+        entity.setNotAfter(toLocalDateTime(ee.getNotAfter()));
+        entity.setSerialNumber(ee.getSerialNumber().toString(16));
+        entity.setPrivateKeyEnc(null); // NE čuvamo privatni ključ
+        repo.save(entity);
+
+        byte[] p12 = null;
+        if (returnP12) {
+            if (p12Password == null || p12Password.isBlank())
+                throw new IllegalArgumentException("p12 password required");
+            p12 = Keystores.toPkcs12(ee, kp.getPrivate(), new X509Certificate[]{ee, caCert}, p12Password.toCharArray());
+        }
+
+        return new IssuedAutogenResult(entity.getId(), p12);
+    }
+
+    // === helpers ===
+
+    private X509Certificate buildAndSignEEFromCsr(
+            PKCS10CertificationRequest csr,
+            X509Certificate issuerCert, PrivateKey issuerKey,
+            Date notBefore, Date notAfter) throws Exception {
+
+        var serial   = new BigInteger(160, SecureRandom.getInstanceStrong()).abs();
+        var subjX500 = csr.getSubject(); // <-- X500Name iz CSR-a
+
+        var builder = new JcaX509v3CertificateBuilder(
+                issuerCert,                      // OK je ostaviti ovu overload varijantu
+                serial, notBefore, notAfter,
+                subjX500,                        // <-- NEMA X500Principal, već X500Name
+                new JcaPEMKeyConverter().getPublicKey(csr.getSubjectPublicKeyInfo())
+        );
+
+        addEeExtensions(builder, csr);
+
+        var signer = new JcaContentSignerBuilder("SHA256withRSA")
+                .setProvider("BC").build(issuerKey);
+        var holder = builder.build(signer);
+        return new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
+    }
+
+
+    private X509Certificate buildAndSignEE(
+            X500Name subject, PublicKey eePub,
+            X509Certificate issuerCert, PrivateKey issuerKey,
+            Date notBefore, Date notAfter) throws Exception {
+
+        var serial = new BigInteger(160, SecureRandom.getInstanceStrong()).abs();
+
+        var builder = new JcaX509v3CertificateBuilder(
+                issuerCert,              // ili koristi issuer X500Name overload – oba rade
+                serial, notBefore, notAfter,
+                subject,                 // <-- prosledi X500Name direktno
+                eePub
+        );
+
+        addEeExtensions(builder, null);
+
+        var signer = new JcaContentSignerBuilder("SHA256withRSA")
+                .setProvider("BC").build(issuerKey);
+        var holder = builder.build(signer);
+        return new JcaX509CertificateConverter().setProvider("BC").getCertificate(holder);
+    }
+
+    private void addEeExtensions(JcaX509v3CertificateBuilder b, PKCS10CertificationRequest csr) throws Exception {
+        // BasicConstraints: CA=false
+        b.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
+        // KeyUsage: digitalSignature | keyEncipherment
+        b.addExtension(Extension.keyUsage, true, new KeyUsage(
+                KeyUsage.digitalSignature | KeyUsage.keyEncipherment
+        ));
+        // (opciono) EKU, SAN…
+        if (csr != null) {
+            var attrs = csr.getAttributes(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest);
+            if (attrs != null && attrs.length > 0) {
+                var exts = Extensions.getInstance(attrs[0].getAttrValues().getObjectAt(0));
+                var san = exts.getExtension(Extension.subjectAlternativeName);
+                if (san != null) {
+                    b.addExtension(Extension.subjectAlternativeName, san.isCritical(), san.getParsedValue());
+                }
+                // EKU itd… filtriraj po politici
+            }
+        }
+    }
+
+    public record IssuedAutogenResult(Long id, byte[] p12Bytes) {}
 
 }

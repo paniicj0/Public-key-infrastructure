@@ -2,6 +2,7 @@ package com.info_security.is.controller;
 
 import com.info_security.is.model.User;
 import com.info_security.is.repository.UserRepository;
+import com.info_security.is.service.UserService;
 import com.info_security.is.verification.TokenVerify;
 import io.jsonwebtoken.ExpiredJwtException;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +22,7 @@ public class AuthController {
 
     private final AuthenticationManager authManager;
     private final TokenVerify tokens;
-    private final UserDetailsService userDetailsService;
+    private final UserService userService;
     private final UserRepository userRepository; // <<< dodaj
 
     record LoginReq(String username, String password) {}
@@ -68,7 +69,7 @@ public class AuthController {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(err("Invalid refresh"));
             }
 
-            UserDetails ud = userDetailsService.loadUserByUsername(username);
+            UserDetails ud = userService.loadUserByUsername(username);
             String newAccess = tokens.generateAccessToken(ud.getUsername());
             return ResponseEntity.ok(new TokensResp(newAccess, null));
 
