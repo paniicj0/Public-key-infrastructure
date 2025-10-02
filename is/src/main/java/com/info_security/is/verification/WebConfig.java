@@ -1,6 +1,7 @@
 package com.info_security.is.verification;
 
-import com.info_security.is.service.CustomUserDetails;
+import com.info_security.is.service.UserService;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
@@ -15,7 +16,6 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -24,87 +24,77 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import static org.springframework.security.config.Customizer.withDefaults;
 import static org.springframework.security.core.context.SecurityContextHolder.MODE_INHERITABLETHREADLOCAL;
 import static org.springframework.security.core.context.SecurityContextHolder.setStrategyName;
-@Log4j2
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity(
-        jsr250Enabled = true
-)
+@EnableMethodSecurity(jsr250Enabled = true, prePostEnabled = true)
+@Log4j2
 public class WebConfig {
 
-    public WebConfig() {
-        // Inherit security context in async function calls
+    private final UserService userService;       // <-- koristiš ovo svuda
+
+    public WebConfig(UserService userService) {
         setStrategyName(MODE_INHERITABLETHREADLOCAL);
+        this.userService = userService;
     }
 
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
+    public PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
 
-    @Autowired
-    private CustomUserDetails jwtUserDetailsService;
-
-    @Autowired
-    private RestAuthenticationEntryPoint restAuthenticationEntryPoint;
+    // NEMA userDetailsService() beana i NEMA @Autowired CustomUserDetails
 
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
-
-        authProvider.setUserDetailsService(jwtUserDetailsService);
-        authProvider.setPasswordEncoder(passwordEncoder());
-
-        return authProvider;
-    }
-
-    @Autowired
-    private TokenVerify tokenUtils;
-
-    @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
-        return authConfig.getAuthenticationManager();
+        var p = new DaoAuthenticationProvider();
+        p.setUserDetailsService(userService);     // <-- ovde koristiš field
+        p.setPasswordEncoder(passwordEncoder());
+        return p;
     }
 
     @Bean
-    public UserDetailsService userDetailsService() {
-        return new CustomUserDetails();
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration cfg) throws Exception {
+        return cfg.getAuthenticationManager();
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http,
+                                           TokenVerify tokenUtils) throws Exception {
+
         http
                 .cors(withDefaults())
-                // Disable CSRF
                 .csrf(AbstractHttpConfigurer::disable)
-                // Set session management to stateless
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // Set unauthorized requests exception handler
-                .exceptionHandling(exception -> exception.authenticationEntryPoint(restAuthenticationEntryPoint))
-                // Configure authorization rules
-                .authorizeHttpRequests(request -> request
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(restAuthenticationEntryPoint)
+                        .accessDeniedHandler((req,res,e) -> {
+                            res.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            res.setContentType("application/json");
+                            res.getWriter().write("{\"error\":\"Forbidden\"}");
+                        })
+                )
+                .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/register/users").permitAll()
-                        .requestMatchers("/api/login", "/api/verify/users/{userId}",  "/api/activation/verify/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/login", "/api/refresh").permitAll()
+                        .requestMatchers("/api/me","/api/login", "/api/verify/users/*",
+                                "/api/activation/verify/**", "/api/activation/verify").permitAll()
                         .requestMatchers("/h2/**", "/socket/**", "/error").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated()
                 )
-                // Add TokenAuthenticationFilter
-                .addFilterBefore(new TokenAuthenticationFilter(tokenUtils, userDetailsService()), UsernamePasswordAuthenticationFilter.class);
+                .authenticationProvider(authenticationProvider()) // <-- bez argumenata
+                .addFilterBefore(new TokenAuthenticationFilter(tokenUtils, userService),
+                        UsernamePasswordAuthenticationFilter.class);
 
-        http.authenticationProvider(authenticationProvider());
-
+        http.headers(h -> h.frameOptions(f -> f.disable()));
         return http.build();
     }
 
     @Bean
     public WebSecurityCustomizer webSecurityCustomizer() {
-        return (web) -> web.ignoring()
-                .requestMatchers("/h2/**")
+        return web -> web.ignoring()
                 .requestMatchers(HttpMethod.GET, "/api/users/token/{token}")
-                .requestMatchers(HttpMethod.POST, "/api/login")
-                .requestMatchers(HttpMethod.GET, "/api/users/owner/{userId}");
+                .requestMatchers(HttpMethod.POST, "/api/login");
     }
 
-
+    @Autowired
+    private RestAuthenticationEntryPoint restAuthenticationEntryPoint;
 }

@@ -5,6 +5,7 @@ import com.info_security.is.enums.UserRole;
 import jakarta.persistence.*;
 import lombok.*;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collection;
@@ -36,7 +37,7 @@ public class User implements UserDetails {
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private Activation activation;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne
     @JoinColumn(name = "organization_id", nullable = false)
     private Organization organization;
 
@@ -46,13 +47,17 @@ public class User implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        return List.of();
+        // pošto u @PreAuthorize koristiš hasAnyAuthority('ADMIN','CA','USER'),
+        // authority string treba da bude baš "ADMIN"/"CA"/"USER"
+        return List.of(new SimpleGrantedAuthority(role.name()));
+        // Ako bi koristio hasAnyRole(...) onda bi ovde bilo: "ROLE_"+role.name()
     }
 
     @Override
     public String getUsername() {
-        return "";
+        return email;     // VAŽNO: username je tvoj email
     }
+
 
     public User(UserDto userDto) {
         this.email = userDto.getEmail();

@@ -28,7 +28,7 @@ public class CertificateModel {
     private String certificatePem; // X.509 u PEM formatu
 
     @Column(columnDefinition = "TEXT")                    // <-- eksplicitno tražimo TEXT
-    private String privateKeyEnc; // enkriptovani privatni ključ (Base64)
+    private String privateKeyEnc;                         // enkriptovani privatni ključ (Base64)
 
     private LocalDateTime notBefore;
     private LocalDateTime notAfter;
@@ -44,4 +44,9 @@ public class CertificateModel {
 
     private LocalDateTime revokedAt;
     private Long revokedByUserId;
+
+    public boolean isCa() {
+        return this.type == CertifaceteType.CA || this.type == CertifaceteType.ROOT;
+    }
+
 }

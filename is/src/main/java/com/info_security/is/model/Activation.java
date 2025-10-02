@@ -29,19 +29,13 @@ public class Activation {
     @NotNull
     private LocalDateTime expirationDate;
 
+    @Column(name = "token_hash", length = 64, unique = true)
+    private String tokenHash;
 
-    public boolean isExpired() {
-        return LocalDateTime.now().isAfter(expirationDate);
-    }
+    // ✅ Kada je link iskorišćen (null dok nije)
+    @Column(name = "used_at")
+    private LocalDateTime usedAt;
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-    public LocalDateTime getExpirationDate() { return expirationDate; }
-    public void setExpirationDate(LocalDateTime expirationDate) { this.expirationDate = expirationDate; }
-    public User getUser() { return user; }
-    public void setUser(User user) { this.user = user; }
-    public LocalDateTime getCreationDate() { return creationDate; }
-    public void setCreationDate(LocalDateTime creationDate) { this.creationDate = creationDate; }
-
-
+    public boolean isExpired() { return LocalDateTime.now().isAfter(expirationDate); }
+    public boolean isUsed() { return usedAt != null; }
 }

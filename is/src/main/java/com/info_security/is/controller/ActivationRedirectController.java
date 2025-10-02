@@ -16,7 +16,7 @@ public class ActivationRedirectController {
     private final UserService userService;
 
     public ActivationRedirectController(
-            @Value("${app.frontend.login-url:http://localhost:4200/login}") String frontendLoginUrl,
+            @Value("${app.frontend.login-url:https://localhost:4200/login}") String frontendLoginUrl,
             UserService userService) {
         this.frontendLoginUrl = frontendLoginUrl;
         this.userService = userService;
