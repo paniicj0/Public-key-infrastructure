@@ -16,4 +16,8 @@ public class Organization {
     private Long id;
     @Column(nullable = false, unique = true)
     private String name;
+
+    @Column(name = "org_key_blob", columnDefinition = "TEXT")
+    private String orgKeyBlob; // {"v":1,"alg":"AES-256-GCM","iv":"...","ct":"...","tag":"..."}
+
 }
