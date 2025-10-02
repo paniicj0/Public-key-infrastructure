@@ -8,8 +8,10 @@ import com.info_security.is.enums.UserRole;
 import com.info_security.is.model.CertificateModel;
 import com.info_security.is.crypto.CryptoUtil;
 import com.info_security.is.crypto.PemUtil;
+import com.info_security.is.model.CertificateTemplate;
 import com.info_security.is.model.User;
 import com.info_security.is.repository.CertificateRepository;
+import com.info_security.is.repository.CertificateTemplateRepository;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
 import org.bouncycastle.asn1.x500.RDN;
@@ -17,6 +19,7 @@ import org.bouncycastle.asn1.x500.X500NameBuilder;
 import org.bouncycastle.asn1.x500.style.BCStyle;
 import org.bouncycastle.asn1.x500.style.IETFUtils;
 import org.bouncycastle.asn1.x509.*;
+import org.bouncycastle.asn1.x509.Certificate;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
@@ -33,7 +36,6 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.security.auth.x500.X500Principal;
 import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
 import java.security.*;
@@ -53,12 +55,14 @@ public class PkiService {
     private final CryptoUtil crypto;
 
     private final CsrUtil csrUtil;
+    private final CertificateTemplateRepository templateRepo;
+
 
     @Autowired
     private UserService userService;
 
 
-    public PkiService(CertificateRepository repo, CryptoUtil crypto, CsrUtil csrUtil) {
+    public PkiService(CertificateRepository repo, CryptoUtil crypto, CsrUtil csrUtil, CertificateTemplateRepository templateRepo) {
         this.repo = repo;
         this.crypto = crypto;
         this.csrUtil = csrUtil;
@@ -66,6 +70,7 @@ public class PkiService {
         if (Security.getProvider("BC") == null) {
             Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
         }
+        this.templateRepo = templateRepo;
     }
 
     /* ===================== PUBLIC API (radi sa tvojim DTO-ovima) ===================== */
@@ -160,6 +165,13 @@ public class PkiService {
         X509Certificate issuerCert = PemUtil.pemToCert(issuerE.getCertificatePem());
         if (!isCa(issuerCert)) throw new IllegalStateException("Issuer is not a CA certificate");
 
+        if (req.getTemplateId() != null) {
+            var tpl = loadTemplateOrThrow(req.getTemplateId());
+            ensureTemplateIssuerCompatible(tpl, issuerE); // strože pravilo (po želji)
+            validateAgainstTemplate(tpl, req.getSubject(), req.getExtensions(), req.getValidityDays());
+            applyTemplateDefaultsToExtensions(tpl, req.getExtensions());
+        }
+
         // 2) Validnost EE ne sme preći važenje izdavaoca
         int days = req.getValidityDays();
         Date nb = new Date();
@@ -214,6 +226,13 @@ public class PkiService {
         if (issuerE.getNotAfter().isBefore(LocalDateTime.now())) throw new IllegalStateException("Issuer expired");
         X509Certificate issuerCert = PemUtil.pemToCert(issuerE.getCertificatePem());
         if (!isCa(issuerCert)) throw new IllegalStateException("Issuer is not a CA certificate");
+
+        if (req.getTemplateId() != null) {
+            var tpl = loadTemplateOrThrow(req.getTemplateId());
+            ensureTemplateIssuerCompatible(tpl, issuerE); // strože pravilo (po želji)
+            validateAgainstTemplate(tpl, req.getSubject(), req.getExtensions(), req.getValidityDays());
+            applyTemplateDefaultsToExtensions(tpl, req.getExtensions());
+        }
 
         // 2) Validnost EE ne sme preći važenje izdavaoca
         int days = req.getValidityDays();
@@ -1075,6 +1094,88 @@ public class PkiService {
 
     private String safeLower(String s) {
         return s == null ? null : s.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+
+    // ===== Template helpers =====
+    private CertificateTemplate loadTemplateOrThrow(Long templateId) {
+        return templateRepo.findById(templateId)
+                .orElseThrow(() -> new IllegalArgumentException("Template not found: " + templateId));
+    }
+
+    /** Ako hoćeš strože: zahtevaj da template.issuer.id == req.issuerId */
+    private void ensureTemplateIssuerCompatible(CertificateTemplate tpl, CertificateModel issuer) {
+        if (tpl.getIssuer() == null) return;
+        if (!Objects.equals(tpl.getIssuer().getId(), issuer.getId())) {
+            throw new IllegalArgumentException("Selected issuer does not match template issuer.");
+        }
+    }
+
+    /** CN/SAN regex + TTL: subject.commonName i extensions.subjectAltNames */
+    private void validateAgainstTemplate(CertificateTemplate tpl,
+                                         SubjectDto subj,
+                                         ExtensionsDto ext,
+                                         int requestedDays) {
+        // CN
+        if (tpl.getCnRegex() != null && subj != null && subj.commonName != null) {
+            if (!subj.commonName.matches(tpl.getCnRegex())) {
+                throw new IllegalArgumentException("CN does not match template regex.");
+            }
+        }
+        // SAN
+        if (tpl.getSanRegex() != null && ext != null && ext.subjectAltNames != null) {
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile(tpl.getSanRegex());
+            for (String san : ext.subjectAltNames) {
+                String value = san;
+                // Dozvoli formate "DNS:example.com" / "IP:1.2.3.4"
+                if (san.startsWith("DNS:")) value = san.substring(4);
+                else if (san.startsWith("IP:")) value = san.substring(3);
+                if (!p.matcher(value).matches()) {
+                    throw new IllegalArgumentException("SAN '" + san + "' does not match template regex.");
+                }
+            }
+        }
+        // TTL
+        if (requestedDays > tpl.getTtlDays()) {
+            throw new IllegalArgumentException("Requested validity exceeds template TTL.");
+        }
+    }
+
+    /** Merge default KeyUsage/EKU iz template-a u tvoj ExtensionsDto */
+    private void applyTemplateDefaultsToExtensions(CertificateTemplate tpl, ExtensionsDto ext) {
+        if (ext == null) return;
+
+        // KeyUsage: tvoj ExtensionsDto koristi booleane. Mapiramo iz enum/string vrednosti šablona.
+        // Pretpostavka: u template-u su KU nazivi: DIGITAL_SIGNATURE, KEY_ENCIPHERMENT, DATA_ENCIPHERMENT, KEY_AGREEMENT, KEY_CERT_SIGN, CRL_SIGN ...
+        if (tpl.getKeyUsage() != null) {
+            var names = tpl.getKeyUsage().stream().map(Enum::name).toList();
+            if (names.contains("DIGITAL_SIGNATURE")) ext.digitalSignature = true;
+            if (names.contains("KEY_ENCIPHERMENT"))  ext.keyEncipherment = true;
+            if (names.contains("DATA_ENCIPHERMENT")) ext.dataEncipherment = true;
+            if (names.contains("KEY_AGREEMENT"))     ext.keyAgreement = true;
+            // (za EE ti svakako ne koristiš keyCertSign/cRLSign, pa ih ignoriši)
+        }
+
+        // ExtendedKeyUsage: u ExtensionsDto imaš List<String> (serverAuth, clientAuth, codeSigning...)
+        if (tpl.getExtendedKeyUsage() != null && !tpl.getExtendedKeyUsage().isEmpty()) {
+            if (ext.extendedKeyUsage == null) ext.extendedKeyUsage = new ArrayList<>();
+            for (var eku : tpl.getExtendedKeyUsage()) {
+                var name = eku.name(); // npr. SERVER_AUTH
+                // mapiramo na tvoja imena koja koristiš u switch-u (serverAuth, clientAuth, codeSigning)
+                switch (name) {
+                    case "SERVER_AUTH" -> addIfAbsent(ext.extendedKeyUsage, "serverAuth");
+                    case "CLIENT_AUTH" -> addIfAbsent(ext.extendedKeyUsage, "clientAuth");
+                    case "CODE_SIGNING" -> addIfAbsent(ext.extendedKeyUsage, "codeSigning");
+                    case "EMAIL_PROTECTION" -> addIfAbsent(ext.extendedKeyUsage, "emailProtection");
+                    case "TIME_STAMPING" -> addIfAbsent(ext.extendedKeyUsage, "timeStamping");
+                    case "OCSP_SIGNING" -> addIfAbsent(ext.extendedKeyUsage, "OCSPSigning");
+                    case "ANY_EXTENDED_USAGE" -> addIfAbsent(ext.extendedKeyUsage, "serverAuth"); // fallback
+                }
+            }
+        }
+    }
+    private static void addIfAbsent(List<String> list, String val) {
+        if (list.stream().noneMatch(v -> v.equalsIgnoreCase(val))) list.add(val);
     }
 
 }

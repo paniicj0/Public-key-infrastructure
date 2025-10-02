@@ -20,4 +20,6 @@ public class EeRequest {
     public Integer keySize;
     public String sigAlg;
     public String pkcs10CsrPem; // ili null ako generišeš ključ server-side
+    private Long templateId;
+
 }
