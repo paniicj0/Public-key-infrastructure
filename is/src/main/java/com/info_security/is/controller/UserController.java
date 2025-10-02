@@ -151,27 +151,6 @@ public class UserController {
                 .orElseGet(() -> new ResponseEntity<>(null, HttpStatus.NOT_FOUND));
     }
 
-
-
-   /* public record LoginResponse(String token, String role) {}
-
-    @PostMapping("/login")
-    public ResponseEntity<LoginResponse> login(@RequestBody AuthenticationRequest req) {
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(req.getUsername(), req.getPassword())
-        );
-
-        User user = (User) authentication.getPrincipal();
-
-        if (!user.isActive()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null);
-        }
-
-        String jwt = tokenUtils.generateToken(user.getEmail());
-        return ResponseEntity.ok(new LoginResponse(jwt, user.getRole().toString()));
-    }
-*/
-
     @GetMapping("/role")
     public ResponseEntity<String> getRole() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();

@@ -460,8 +460,8 @@ public class PkiService {
 
         // Običan korisnik: može samo svoje EE (pretpostavka da imaš vezu user <-> EE; ako nemaš, upotrebi email iz subject-a)
         if (actor.getRole() == UserRole.USER) {
-            if (target.getType() != CertifaceteType.EE) return false;
-            return eeBelongsToUser(actor, target);
+            return target.getType() == CertifaceteType.EE
+                    && eeBelongsToUserNew(actor, target); // ✅ već postoji helper
         }
 
         // CA korisnik: dozvoljeno u okviru svog lanca/organizacije
@@ -688,15 +688,21 @@ public class PkiService {
     }
 
     // CA moze da ima uvid samo u svoje sertifikate
+    // CA može da vidi sve sertifikate koji pripadaju njegovom lancu / organizaciji
     public List<CertificateResponse> listCertificatesCA() {
-        User currentUser = userService.getCurrentUser();
-        if (currentUser == null) {
-            throw new SecurityException("User not authenticated");
+        User me = userService.getCurrentUser();
+        if (me == null) throw new SecurityException("User not authenticated");
+        if (me.getRole() != UserRole.CA && me.getRole() != UserRole.ADMIN) {
+            throw new AccessDeniedException("Only CA/ADMIN can access this list");
         }
 
-        return repo.findById(currentUser.getId())
-                    .stream().map(CertificateResponse::new).toList();
+        String org = userService.getCurrentUserOrganization(); // npr. "MyOrg"
+        return repo.findAllByOrderByIdDesc().stream()
+                .filter(c -> belongsToOrgChain(c, org))   // ✅ već imaš helper
+                .map(CertificateResponse::new)
+                .toList();
     }
+
 
 
     //AUTOMATSKI SE UNOSI ORGANIZACIJA KORISNIKA
@@ -1153,7 +1159,7 @@ public class PkiService {
             if (names.contains("KEY_ENCIPHERMENT"))  ext.keyEncipherment = true;
             if (names.contains("DATA_ENCIPHERMENT")) ext.dataEncipherment = true;
             if (names.contains("KEY_AGREEMENT"))     ext.keyAgreement = true;
-            // (za EE ti svakako ne koristiš keyCertSign/cRLSign, pa ih ignoriši)
+
         }
 
         // ExtendedKeyUsage: u ExtensionsDto imaš List<String> (serverAuth, clientAuth, codeSigning...)
